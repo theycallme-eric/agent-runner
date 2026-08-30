@@ -1,0 +1,96 @@
+# Architecture spike
+
+## Boundary
+
+```text
+Standalone Agent Runner
+  registry + durable state + leases + policy + reconciliation + reporting
+             ↕ versioned project contract
+Product repository
+  requirements/tasks + dependency source + verification + gates + agent instructions
+             ↕ worker adapter
+Claude/Fable | Codex | OpenHands | future ACP-compatible workers
+```
+
+The controller never owns product requirements or source code. The project never vendors the
+controller. Installation adds one editable contract and a short pointer from the project's agent
+instructions.
+
+## Minimal project injection
+
+```text
+.agent-runner.yml   # task source, setup, verification, protected paths, concurrency, delivery policy
+AGENTS.md           # existing instructions plus a short Agent Runner pointer
+CLAUDE.md           # optional thin import for Claude Code
+```
+
+Example contract:
+
+```yaml
+version: 1
+project:
+  id: theycallme-eric/clear
+  baseBranch: main
+tasks:
+  provider: github
+  dependencies: github-native
+workspace:
+  setup:
+    - npm ci
+verification:
+  required:
+    - npm run typecheck
+    - npm test
+    - npm run build
+  protectedPaths:
+    - pattern: .github/workflows/**
+      gate: human
+execution:
+  concurrency: 2
+  attempts: 2
+  timeoutMinutes: 120
+delivery:
+  pullRequest: true
+  merge: never
+```
+
+Worker/model selection belongs to controller or user configuration rather than the project contract.
+Secrets never belong in the contract.
+
+## Durable lifecycle
+
+```text
+discovered → claimed → workspace-ready → running → verifying
+           → synchronized → PR-open → CI → waiting-human/completed/failed
+```
+
+Every transition is idempotent and recorded with the task revision, base SHA, head SHA, workspace,
+worker session, attempt, and evidence. GitHub events trigger reconciliation but are not trusted as an
+ordered or complete event log.
+
+## First implementation slice: build-versus-adopt spike
+
+Do not build the production controller first. Use a disposable fixture repository and answer these
+questions with executable evidence:
+
+1. Can DoorDash Agentic Orchestrator accept an externally selected issue and expose enough lifecycle
+   state to add leases, CI reconciliation, and DAG refresh without maintaining a hard fork?
+2. Can Beads supply the normalized ready/claim/close ledger while GitHub remains the visible task
+   surface?
+3. Can Spec Kit initialize requirements and produce dependency-preserving GitHub issues without
+   coupling projects to one coding agent?
+4. Can Claude Code's background/structured interfaces run one fixture task, survive interruption,
+   and produce enough state for controller reconciliation?
+5. Which components pass license, update, observability, and failure-recovery requirements?
+
+### Spike exit criteria
+
+- One fixture task is claimed atomically and cannot be claimed twice.
+- One isolated worker produces a branch and draft pull request.
+- Controller-owned verification rejects a false worker-success report.
+- Restarting the controller resumes or safely classifies the run without duplicating work.
+- Advancing the base branch forces synchronization and complete re-verification.
+- A protected-path change stops at a visible human gate.
+- The evidence supports an explicit adopt, extend, or build decision for each layer.
+
+Only after this spike should CLEAR receive its adapter.
