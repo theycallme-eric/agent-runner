@@ -94,3 +94,10 @@ questions with executable evidence:
 - The evidence supports an explicit adopt, extend, or build decision for each layer.
 
 Only after this spike should CLEAR receive its adapter.
+
+## Executable evidence so far
+
+The local simulator now covers the controller-owned portions of exit criteria 1, 3, 4, 5, and 6.
+The unresolved portion is deliberately external: task discovery from a forge, isolated worktree and
+branch creation, a real worker session, and draft pull-request publication. Those belong in the next
+fixture-repository experiment, not in CLEAR.

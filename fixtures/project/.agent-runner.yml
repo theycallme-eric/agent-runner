@@ -1,0 +1,27 @@
+version: 1
+project:
+  id: fixture/example
+  baseBranch: main
+tasks:
+  provider: github
+  dependencies: github-native
+workspace:
+  setup:
+    - npm ci
+verification:
+  required:
+    - npm run check
+    - npm test
+    - npm run build
+  protectedPaths:
+    - pattern: .github/workflows/**
+      gate: human
+    - pattern: migrations/**
+      gate: human
+execution:
+  concurrency: 2
+  attempts: 2
+  timeoutMinutes: 120
+delivery:
+  pullRequest: true
+  merge: never

@@ -12,3 +12,8 @@ failing CI, protected-path changes, and human gates before real unattended execu
 
 Do not add secrets, credentials, raw private transcripts, or personal project data. Never enable
 automatic merging without a separately reviewed policy and protected-branch enforcement.
+
+For material implementation sessions, append a concise, factual entry to
+`docs/implementation-log.md`: what changed, what failed, the correction, evidence, and the next open
+decision. This log is the persistent handoff for Codex, Claude Code, and future agent tools; do not
+turn it into a transcript.
