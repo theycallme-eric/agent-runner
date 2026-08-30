@@ -97,7 +97,18 @@ Only after this spike should CLEAR receive its adapter.
 
 ## Executable evidence so far
 
-The local simulator now covers the controller-owned portions of exit criteria 1, 3, 4, 5, and 6.
-The unresolved portion is deliberately external: task discovery from a forge, isolated worktree and
-branch creation, a real worker session, and draft pull-request publication. Those belong in the next
-fixture-repository experiment, not in CLEAR.
+The local simulator now covers the controller-owned portions of exit criteria 1, 3, 4, 5, and 6. A
+disposable Git harness also creates an isolated task branch at the exact selected base, and a
+model-neutral worker boundary has fake-worker coverage. The unresolved portion is deliberately
+external: task discovery from a forge, a successful isolated real-worker session, and draft
+pull-request publication. Those belong in fixture-repository experiments, not in CLEAR.
+
+Real workers remain fail-closed. The first Claude/Fable smoke test revealed that inherited MCP state
+can break a headless run and that `--max-budget-usd` is a stop condition rather than an enforceable
+preflight cap. The controller must isolate worker settings and enforce its own aggregate admission
+budget before unattended runs are enabled.
+
+The local Claude adapter therefore opts into setting sources explicitly, uses strict empty MCP
+configuration by default, disables browser integration, slash commands, and auto-memory, and
+requires both a turn limit and a wall-clock timeout. A production project may opt into its checked-in
+`project` source so `CLAUDE.md` is visible; user and local settings are never inherited implicitly.

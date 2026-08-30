@@ -10,8 +10,10 @@ independent and receive only a small, editable project adapter.
 
 The first local reliability slice is executable. It validates a project's `.agent-runner.yml`,
 stores claims and lifecycle events durably in SQLite, and simulates controller-owned verification,
-base synchronization, CI, retries, and human gates. It is not yet connected to GitHub or a real
-Claude/Codex worker, and nothing here is currently running in the background.
+base synchronization, CI, retries, and human gates. A local Claude Code adapter and disposable Git
+worktree harness exist, but real unattended execution is deliberately disabled while inherited
+settings and enforceable spend limits are unresolved. It is not yet connected to GitHub, and
+nothing here is currently running in the background.
 
 ## Start here
 
@@ -35,7 +37,13 @@ npm run verify
 The suite currently proves that duplicate claims are rejected, stale work is reclaimed without a
 second run, exhausted workers fail visibly, controller restarts preserve state, invalid transitions
 fail closed, false worker success is rejected, advanced bases force re-verification, protected paths
-wait for a human, and failing CI cannot complete a run.
+wait for a human, failing CI cannot complete a run, workers are replaceable, and a task branch starts
+in an isolated worktree at the selected base commit.
+
+`npm run smoke:fable` is a manual diagnostic, not part of verification or unattended execution. Set
+`AGENT_RUNNER_CLAUDE_BIN` when the intended Claude Code binary is not first on `PATH`. Do not treat
+Claude Code's `--max-budget-usd` as a hard preflight spending cap; the first real spike exceeded the
+configured value before stopping.
 
 ## Intended experience
 

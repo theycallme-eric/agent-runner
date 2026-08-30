@@ -55,6 +55,8 @@ durable controller. Treat it as a reference unless this project deliberately ado
 
 - [Claude Code dynamic workflows](https://code.claude.com/docs/en/workflows)
 - [Claude Code headless execution](https://code.claude.com/docs/en/headless)
+- [Claude Code CLI reference](https://code.claude.com/docs/en/cli-usage)
+- [Claude Agent SDK filesystem isolation](https://code.claude.com/docs/en/agent-sdk/claude-code-features)
 - [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)
 - [GitHub Spec Kit workflows](https://github.com/github/spec-kit/blob/main/docs/reference/workflows.md)
 - [OpenHands issue resolver](https://github.com/All-Hands-AI/OpenHands/blob/main/openhands/resolver/README.md)

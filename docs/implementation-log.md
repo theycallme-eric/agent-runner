@@ -31,3 +31,33 @@ transcripts or secrets here.
   reports a `never` merge policy.
 - Next open decision: connect one fixture issue to an isolated real worker and compare adopting an
   existing controller against extending this thin ledger.
+
+## 2026-08-30 — Isolated worker boundary and Fable probe
+
+- Added a model-neutral worker interface, a Claude Code JSON adapter, an isolated Git worktree
+  manager, and a fixture runner. Deterministic tests use a fake worker; normal verification never
+  calls a paid model.
+- Added exact-base worktree tests and fail-closed handling for worker-process failures. The local
+  suite now has 17 tests.
+- Claude Code `2.1.2` has no `auth status` subcommand. Invoking those words treated them as a prompt;
+  the session completed without edits. Future probes must always use explicit `--print`, model,
+  tools, output, permission, persistence, timeout, and budget arguments.
+- A first no-tools local-headless probe used model `fable`, permission mode `dontAsk`, no session
+  persistence, a 120-second timeout, and `--max-budget-usd 0.10`. Version `2.1.2` returned a model 404
+  with reported cost `$0`.
+- `claude update` installed `2.1.251` in the user npm prefix, but the shell still resolves an older
+  `/usr/local` installation first. The adapter now supports an explicit executable through
+  `AGENT_RUNNER_CLAUDE_BIN`; the duplicate installation is not silently ignored.
+- The same local-headless probe against `2.1.251` reached Fable but failed while loading inherited
+  pre-upgrade MCP OAuth state. It reported estimated cost `$0.664715` despite the `$0.10` stop value.
+  No files were edited. Real model calls were stopped immediately.
+- Safety decision: keep unattended real workers disabled until settings/MCP isolation is proven and
+  the controller has an aggregate admission budget that does not rely on the worker's stop flag.
+- Official Claude documentation confirms that filesystem setting sources must be explicitly selected
+  and that `max_budget_usd` stops on a client-side estimate. Updated the adapter to use an explicit
+  setting-source list, strict empty MCP configuration, no browser or slash commands, disabled
+  auto-memory, a turn limit, and a wall-clock timeout. The isolation arguments are covered by a fake
+  executable test; no second paid probe was made.
+- Next open decision: inspect cost semantics with a non-paid or separately approved probe, add an
+  aggregate controller admission budget, then publish a disposable draft PR through a fixture GitHub
+  repository.
