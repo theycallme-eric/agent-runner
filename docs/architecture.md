@@ -118,7 +118,9 @@ and CI state, and rejects failed CI or non-draft publication. The live dogfood p
 successful isolated Fable session and persisted draft pull request. Restart reconciliation now
 classifies durable identities before new claims, synchronizes advanced bases inside the isolated
 worktree, reruns required verification, and observes existing drafts without routine republishing.
-The remaining controller layer is bounded multi-project scheduling and reporting before CLEAR.
+The bounded multi-project scheduler now reuses this joined path with explicit limits and a morning
+report. The remaining gates before CLEAR are a supervised live scheduler run and repeatable local
+service/container packaging.
 
 `run-once` is the first joined public surface. It refreshes `origin/<base>` before claiming and uses
 read-only `ls-remote` checks during execution/delivery, avoiding the stale-local-branch assumption.

@@ -28,6 +28,9 @@ async function main(): Promise<void> {
     case "run-once":
       await runOnceCommand(argumentsList);
       return;
+    case "autopilot":
+      await autopilotCommand(argumentsList);
+      return;
     default:
       usage();
   }
@@ -258,6 +261,99 @@ async function runOnceCommand(argumentsList: string[]): Promise<void> {
   }
 }
 
+async function autopilotCommand(argumentsList: string[]): Promise<void> {
+  const statePath = statePathFrom(argumentsList);
+  const profilesPath = workerConfigPathFrom(argumentsList);
+  const workspaceRoot = option(argumentsList, "--workspace-root")
+    ? resolve(option(argumentsList, "--workspace-root") ?? "")
+    : join(dirname(statePath), "workspaces");
+  const enabled = argumentsList.includes("--enable");
+  const minutes = positiveOption(argumentsList, "--minutes", 480);
+  const maxNewClaims = positiveOption(argumentsList, "--max-new-claims", 10);
+  const maxNoProgressPasses = positiveOption(argumentsList, "--no-progress-passes", 3);
+  const pollIntervalMs = positiveOption(argumentsList, "--poll-seconds", 60) * 1_000;
+  const leaseDurationMs = positiveOption(argumentsList, "--lease-seconds", 300) * 1_000;
+  const controllerId = option(argumentsList, "--controller") ?? `${hostname()}-${process.pid}`;
+  const ghExecutable = process.env.AGENT_RUNNER_GH_BIN ?? "gh";
+  const gitExecutable = process.env.AGENT_RUNNER_GIT_BIN ?? "git";
+  await mkdir(dirname(statePath), { recursive: true });
+  await mkdir(workspaceRoot, { recursive: true });
+  const [
+    { ProjectRegistryStore },
+    { RunStore },
+    { TaskProviderRegistry },
+    { DependencyResolverRegistry },
+    { registerGitHubAdapters },
+    { ProjectPlanner },
+    { loadWorkerProfiles },
+    { GitWorktreeManager },
+    { GitWorkspaceRepository },
+    { GitRemoteBaseRevisionProvider },
+    { PullRequestPublisherRegistry },
+    { GitHubPullRequestPublisher },
+    { ShellCommandRunner },
+    { RunOnceController },
+    { AutopilotController },
+  ] = await Promise.all([
+    import("./projects/registry.js"),
+    import("./core/store.js"),
+    import("./tasks/provider-registry.js"),
+    import("./tasks/dependency-registry.js"),
+    import("./github/register.js"),
+    import("./planning/project-planner.js"),
+    import("./workers/config.js"),
+    import("./workspaces/git-worktree.js"),
+    import("./workspaces/git-repository.js"),
+    import("./workspaces/base-revision.js"),
+    import("./delivery/registry.js"),
+    import("./github/pull-request-publisher.js"),
+    import("./execution/command-runner.js"),
+    import("./runtime/run-once.js"),
+    import("./autopilot/controller.js"),
+  ]);
+  const projects = new ProjectRegistryStore(statePath);
+  const runs = new RunStore(statePath);
+  try {
+    const providers = new TaskProviderRegistry();
+    const dependencies = new DependencyResolverRegistry();
+    registerGitHubAdapters(providers, dependencies, ghExecutable);
+    const workers = await loadWorkerProfiles(profilesPath);
+    const publishers = new PullRequestPublisherRegistry();
+    publishers.register(new GitHubPullRequestPublisher({ ghExecutable, gitExecutable }));
+    const repository = new GitWorkspaceRepository(gitExecutable);
+    const baseRevisions = new GitRemoteBaseRevisionProvider(gitExecutable);
+    const runOnce = new RunOnceController(
+      projects,
+      runs,
+      new ProjectPlanner(runs, providers, dependencies),
+      workers.registry,
+      new GitWorktreeManager(workspaceRoot, gitExecutable),
+      repository,
+      baseRevisions,
+      publishers,
+      new ShellCommandRunner(),
+    );
+    const startedAt = Date.now();
+    const result = await new AutopilotController(projects, runs, runOnce).run({
+      enabled,
+      controllerId,
+      leaseDurationMs,
+      deadlineAt: startedAt + minutes * 60_000,
+      maxNewClaims,
+      maxNoProgressPasses,
+      pollIntervalMs,
+      globalConcurrency: 1,
+    });
+    print(result);
+    if (["run-failure", "worker-unavailable", "quota-unavailable"].includes(result.stopReason)) {
+      process.exitCode = 1;
+    }
+  } finally {
+    runs.close();
+    projects.close();
+  }
+}
+
 async function resolveContractPath(input: string): Promise<string> {
   const path = resolve(input);
   try {
@@ -321,7 +417,11 @@ function usage(): void {
   agent-runner profiles [--profiles <worker-config>]
   agent-runner run-once <project-id> [--dry-run] [--limit <count>] [--task <task-id>]
     [--state <database>] [--profiles <worker-config>] [--workspace-root <directory>]
-    [--controller <id>] [--lease-seconds <seconds>]`);
+    [--controller <id>] [--lease-seconds <seconds>]
+  agent-runner autopilot --enable [--minutes <count>] [--max-new-claims <count>]
+    [--no-progress-passes <count>] [--poll-seconds <seconds>] [--state <database>]
+    [--profiles <worker-config>] [--workspace-root <directory>] [--controller <id>]
+    [--lease-seconds <seconds>]`);
   process.exitCode = 2;
 }
 
