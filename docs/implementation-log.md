@@ -213,3 +213,6 @@ transcripts or secrets here.
 - Live preparation exposed two simultaneously ready tasks: deterministic `--limit 1` would select
   RECON-01 before the intended documentation-only DOGFOOD-01. Added explicit `--task <id>` selection
   with ready-state validation rather than changing labels, dependencies, or relying on issue order.
+- The first live dry-run then correctly selected DOGFOOD-01 but reported `limitReached: true` by
+  counting the unrelated ready task. Corrected dry-run accounting to apply the target filter before
+  the limit metric, matching the mutating planner.

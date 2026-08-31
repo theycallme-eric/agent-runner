@@ -129,7 +129,7 @@ export class RunOnceController {
         reconciled: [],
         duplicateTaskIds: [],
         capacityReached: false,
-        limitReached: inspected.graph.ready.length > request.maxClaims,
+        limitReached: (request.targetTaskId ? 1 : inspected.graph.ready.length) > request.maxClaims,
       };
     }
 

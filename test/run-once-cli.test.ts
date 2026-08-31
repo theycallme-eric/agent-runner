@@ -75,6 +75,7 @@ profiles:
     assert.equal(dryRun.dryRun, true);
     assert.deepEqual(dryRun.ready, [{ id: "issue-1", title: "Fixture implementation" }]);
     assert.deepEqual(dryRun.claimed, []);
+    assert.equal(dryRun.limitReached, false);
     assert.equal(readFileIfExists(callLog), "");
 
     const executed = cliJson(cli, ["run-once", ...common], environment) as RunOnceOutput;
@@ -123,6 +124,7 @@ interface RunOnceOutput {
     ciStatus: string | null;
   }>;
   duplicateTaskIds: string[];
+  limitReached: boolean;
 }
 
 function projectContract(): string {
