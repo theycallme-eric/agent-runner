@@ -18,6 +18,10 @@ Safe defaults are one new claim, a five-minute claim lease, the controller datab
 `workspaces/` directory, and the local worker-profile config. `--limit` may be raised up to the
 project's concurrency policy; claims and executions at that point may run in parallel.
 
+When several tasks are ready, `--task <normalized-task-id>` selects one explicitly (for GitHub,
+`issue-7`). An unknown, waiting, blocked, or completed selection fails before a claim. This avoids
+changing labels or relying on provider ordering when running a deliberate dogfood task.
+
 ## Dry run
 
 ```text

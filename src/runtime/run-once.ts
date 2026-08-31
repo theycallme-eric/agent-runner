@@ -17,6 +17,7 @@ export interface RunOnceRequest {
   leaseDurationMs: number;
   maxClaims: number;
   dryRun: boolean;
+  targetTaskId: string | null;
 }
 
 export interface RunOnceTaskResult {
@@ -35,6 +36,7 @@ export interface RunOnceTaskResult {
 export interface RunOnceResult {
   ok: boolean;
   dryRun: boolean;
+  targetTaskId: string | null;
   project: string;
   baseSha: string;
   workerProfile: string;
@@ -111,9 +113,11 @@ export class RunOnceController {
       : await this.#baseRevisions.refresh(project.rootPath, contract.project.baseBranch);
     if (request.dryRun) {
       const inspected = await this.#planner.inspect(project, contract);
+      assertTargetReady(request.targetTaskId, inspected.graph.ready.map((task) => task.id));
       return {
         ok: true,
         dryRun: true,
+        targetTaskId: request.targetTaskId,
         project: project.id,
         baseSha,
         workerProfile: project.workerProfile,
@@ -137,6 +141,7 @@ export class RunOnceController {
       now: this.#now(),
       leaseDurationMs: request.leaseDurationMs,
       maxClaims: request.maxClaims,
+      ...(request.targetTaskId ? { taskIds: [request.targetTaskId] } : {}),
     });
     const executor = new TaskExecutor(
       this.#runs,
@@ -248,6 +253,7 @@ export class RunOnceController {
     return {
       ok,
       dryRun: false,
+      targetTaskId: request.targetTaskId,
       project: project.id,
       baseSha,
       workerProfile: project.workerProfile,
@@ -291,5 +297,14 @@ function validateRequest(request: RunOnceRequest): void {
   }
   if (!Number.isInteger(request.maxClaims) || request.maxClaims < 1) {
     throw new Error("maxClaims must be a positive integer");
+  }
+  if (request.targetTaskId !== null && request.targetTaskId.trim() === "") {
+    throw new Error("targetTaskId must be null or non-empty");
+  }
+}
+
+function assertTargetReady(targetTaskId: string | null, readyTaskIds: string[]): void {
+  if (targetTaskId !== null && !readyTaskIds.includes(targetTaskId)) {
+    throw new Error(`Requested task is not ready: ${targetTaskId}`);
   }
 }

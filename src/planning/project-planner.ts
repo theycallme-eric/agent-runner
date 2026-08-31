@@ -15,6 +15,7 @@ export interface PlanProjectRequest {
   now: number;
   leaseDurationMs: number;
   maxClaims?: number;
+  taskIds?: string[];
 }
 
 export interface ClaimedTask {
@@ -56,12 +57,13 @@ export class ProjectPlanner {
     const dependencyResolver = this.#dependencies.get(request.contract.tasks.dependencies);
     const graph = inspected.graph;
     const maxClaims = request.maxClaims ?? Number.POSITIVE_INFINITY;
+    const readyTasks = selectReadyTasks(graph.ready, request.taskIds);
     const claimed: ClaimedTask[] = [];
     const duplicateTaskIds: string[] = [];
     let capacityReached = false;
     let limitReached = false;
 
-    for (const task of graph.ready) {
+    for (const task of readyTasks) {
       if (claimed.length >= maxClaims) {
         limitReached = true;
         break;
@@ -133,6 +135,26 @@ function validateRequest(request: PlanProjectRequest): void {
   if (request.maxClaims !== undefined && (!Number.isInteger(request.maxClaims) || request.maxClaims < 1)) {
     throw new Error("maxClaims must be a positive integer");
   }
+  if (request.taskIds !== undefined) {
+    if (request.taskIds.length === 0 || request.taskIds.some((taskId) => taskId.trim() === "")) {
+      throw new Error("taskIds must contain non-empty task ids");
+    }
+    if (new Set(request.taskIds).size !== request.taskIds.length) {
+      throw new Error("taskIds must not contain duplicates");
+    }
+  }
+}
+
+function selectReadyTasks(ready: TaskNode[], taskIds: string[] | undefined): TaskNode[] {
+  if (taskIds === undefined) {
+    return ready;
+  }
+  const byId = new Map(ready.map((task) => [task.id, task]));
+  const unavailable = taskIds.filter((taskId) => !byId.has(taskId));
+  if (unavailable.length > 0) {
+    throw new Error(`Requested tasks are not ready: ${unavailable.join(", ")}`);
+  }
+  return taskIds.map((taskId) => byId.get(taskId) as TaskNode);
 }
 
 function validateProject(project: ProjectRegistration, contract: ProjectContract): void {

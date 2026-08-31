@@ -66,6 +66,8 @@ profiles:
       "60",
       "--limit",
       "1",
+      "--task",
+      "issue-1",
     ];
     const dryRun = cliJson(cli, ["run-once", ...common, "--dry-run"], environment) as RunOnceOutput;
 

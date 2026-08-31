@@ -178,6 +178,7 @@ async function runOnceCommand(argumentsList: string[]): Promise<void> {
     ? resolve(option(argumentsList, "--workspace-root") ?? "")
     : join(dirname(statePath), "workspaces");
   const maxClaims = positiveOption(argumentsList, "--limit", 1);
+  const targetTaskId = option(argumentsList, "--task");
   const leaseDurationMs = positiveOption(argumentsList, "--lease-seconds", 300) * 1_000;
   const controllerId = option(argumentsList, "--controller") ?? `${hostname()}-${process.pid}`;
   const dryRun = argumentsList.includes("--dry-run");
@@ -245,6 +246,7 @@ async function runOnceCommand(argumentsList: string[]): Promise<void> {
       leaseDurationMs,
       maxClaims,
       dryRun,
+      targetTaskId,
     });
     print(result);
     if (!result.ok) {
@@ -317,7 +319,7 @@ function usage(): void {
   agent-runner status [--state <database>]
   agent-runner ready <project-id> [--state <database>]
   agent-runner profiles [--profiles <worker-config>]
-  agent-runner run-once <project-id> [--dry-run] [--limit <count>]
+  agent-runner run-once <project-id> [--dry-run] [--limit <count>] [--task <task-id>]
     [--state <database>] [--profiles <worker-config>] [--workspace-root <directory>]
     [--controller <id>] [--lease-seconds <seconds>]`);
   process.exitCode = 2;

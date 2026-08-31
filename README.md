@@ -78,7 +78,8 @@ default path is `~/.config/agent-runner/workers.yml`; `--profiles` or
 
 `run-once` is the explicit mutation boundary. `--dry-run` validates the same project, profile,
 remote base, and DAG without claiming, launching, pushing, or publishing. A real run defaults to one
-new claim and never merges. See [the one-shot run contract](docs/run-once.md).
+new claim; `--task issue-7` can target one ready task explicitly. It never merges. See
+[the one-shot run contract](docs/run-once.md).
 
 ## Coding-agent support
 

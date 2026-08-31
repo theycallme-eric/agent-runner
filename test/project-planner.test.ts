@@ -140,9 +140,36 @@ test("an explicit claim limit can be lower than project concurrency", async () =
     });
 
     assert.equal(result.claimed.length, 1);
+    assert.equal(result.claimed[0]?.task.id, "ONE");
     assert.equal(result.limitReached, true);
     assert.equal(result.capacityReached, false);
     assert.equal(runs.activeCount("example/limited"), 1);
+  } finally {
+    runs.close();
+  }
+});
+
+test("an explicitly selected ready task does not depend on provider order", async () => {
+  const runs = new RunStore();
+  const providers = new TaskProviderRegistry();
+  const dependencies = new DependencyResolverRegistry();
+  dependencies.register({ name: "embedded-dag", resolve: async (tasks) => tasks });
+  providers.register({ name: "fixture", listTasks: async () => [task("ONE"), task("TWO")] });
+  const planner = new ProjectPlanner(runs, providers, dependencies);
+  try {
+    const result = await planner.claimReady({
+      project: registration("example/targeted", "worker-one"),
+      contract: contract("example/targeted", "fixture", 2),
+      baseSha: "base",
+      controllerId: "controller-1",
+      now: 1_000,
+      leaseDurationMs: 1_000,
+      maxClaims: 1,
+      taskIds: ["TWO"],
+    });
+
+    assert.equal(result.claimed[0]?.task.id, "TWO");
+    assert.equal(result.limitReached, false);
   } finally {
     runs.close();
   }

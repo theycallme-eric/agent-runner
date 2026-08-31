@@ -204,9 +204,12 @@ transcripts or secrets here.
   delivery failure leaves a complete structured batch result, sets `ok: false`, and exits non-zero.
 - Repeated task revisions at `verified`, `pr-open`, or `ci` now re-poll/reconcile the persisted draft
   without relaunching a worker. Broader stale-run recovery remains RECON-01.
-- Evidence: 58 deterministic tests pass. The full CLI fixture uses a real local Git remote/worktree,
+- Evidence: 59 deterministic tests pass. The full CLI fixture uses a real local Git remote/worktree,
   fake GitHub issue/PR/check APIs, and a fake JSON worker to prove dry-run isolation, remote-base
   fetch, one claim, independent shell verification, one draft PR, pending CI, and a later no-worker
   reconciliation to passing CI without another PR.
 - Next open decision: publish CLI-01, configure the local `claude-fable` profile, run a live dry-run,
   and execute DOGFOOD-01 as the first real repository-owned draft pull request.
+- Live preparation exposed two simultaneously ready tasks: deterministic `--limit 1` would select
+  RECON-01 before the intended documentation-only DOGFOOD-01. Added explicit `--task <id>` selection
+  with ready-state validation rather than changing labels, dependencies, or relying on issue order.
