@@ -62,6 +62,7 @@ export function parseWorkerProfiles(
           "tools",
           "settingSources",
           "persistSession",
+          "permissionMode",
           "environment",
         ],
         ["adapter", "model", "maxBudgetUsd", "maxTurns"],
@@ -85,6 +86,9 @@ export function parseWorkerProfiles(
         persistSession: value.persistSession === undefined
           ? false
           : booleanAt(value.persistSession, `profiles.${profile}.persistSession`),
+        permissionMode: value.permissionMode === undefined
+          ? "dontAsk"
+          : permissionModeAt(value.permissionMode, `profiles.${profile}.permissionMode`),
         environment: environmentConfig.values,
       });
       registry.register(profile, worker);
@@ -221,6 +225,14 @@ function settingSourcesAt(
     throw new Error(`${path} contains duplicate setting sources`);
   }
   return sources as Array<"user" | "project" | "local">;
+}
+
+function permissionModeAt(value: unknown, path: string): "dontAsk" | "acceptEdits" {
+  const result = stringAt(value, path);
+  if (result !== "dontAsk" && result !== "acceptEdits") {
+    throw new Error(`${path} must be dontAsk or acceptEdits`);
+  }
+  return result;
 }
 
 function executableAt(value: unknown, path: string): string {

@@ -21,6 +21,7 @@ export interface ClaudeCodeWorkerOptions {
   settingSources: Array<"user" | "project" | "local">;
   persistSession: boolean;
   environment?: Record<string, string>;
+  permissionMode?: "dontAsk" | "acceptEdits";
 }
 
 export class ClaudeCodeWorker implements WorkerAdapter {
@@ -33,6 +34,7 @@ export class ClaudeCodeWorker implements WorkerAdapter {
       ...options,
       executable: options.executable ?? "claude",
       environment: options.environment ?? {},
+      permissionMode: options.permissionMode ?? "dontAsk",
     };
   }
 
@@ -47,7 +49,7 @@ export class ClaudeCodeWorker implements WorkerAdapter {
       "--output-format",
       "json",
       "--permission-mode",
-      "dontAsk",
+      this.#options.permissionMode,
       "--max-budget-usd",
       String(this.#options.maxBudgetUsd),
       "--max-turns",

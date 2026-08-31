@@ -216,3 +216,22 @@ transcripts or secrets here.
 - The first live dry-run then correctly selected DOGFOOD-01 but reported `limitReached: true` by
   counting the unrelated ready task. Corrected dry-run accounting to apply the target filter before
   the limit metric, matching the mutating planner.
+
+## 2026-08-31 — First live worker attempt and permission correction
+
+- The corrected DOGFOOD-01 dry-run passed against remote base `4eeea76`: the target, Fable profile,
+  GitHub adapters, graph, and claim limit all validated without a claim or model call.
+- The first mutating `run-once` claimed issue #7 and created its isolated worktree. `npm ci` passed and
+  the lease heartbeated throughout an 80-second Fable session. Fable read the required documents and
+  drafted the requested runbook, but Claude Code denied Write/Edit under headless `dontAsk` mode.
+- Fable returned a normal text result describing the block rather than a process error. The controller
+  independently found no repository change, failed the run as `worker-no-changes`, and did not run
+  verification, push a branch, or create a pull request. This is the intended false-success defense.
+- Persisted non-secret evidence: run `465d21ee-d158-447d-9ddf-77d9ef4e72cb`, profile
+  `claude-fable`, model `fable`, worker session `0bdcdeb8-f1a9-48aa-a8ad-aecb80fdcafc`, local usage
+  estimate `$0.928559`, duration 80.643 seconds, and failure `worker-no-changes`.
+- Corrected the profile boundary by making Claude permission mode explicit. `dontAsk` remains the
+  fail-closed default; `acceptEdits` permits worktree Write/Edit for implementation profiles;
+  `bypassPermissions` is rejected by schema. The local dogfood profile now selects `acceptEdits`.
+- Next open decision: verify the permission-profile correction, create a new issue revision so the
+  failed immutable run is preserved, and retry DOGFOOD-01 through the same public command.

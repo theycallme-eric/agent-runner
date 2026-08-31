@@ -109,6 +109,19 @@ profiles:
 `, {}),
     /unknown fields: surprise/,
   );
+  assert.throws(
+    () => parseWorkerProfiles(`
+version: 1
+profiles:
+  unsafe-claude:
+    adapter: claude-code
+    model: fable
+    maxBudgetUsd: 1
+    maxTurns: 1
+    permissionMode: bypassPermissions
+`, {}),
+    /must be dontAsk or acceptEdits/,
+  );
 });
 
 function workerConfig(claude: string, generic: string): string {
@@ -121,6 +134,7 @@ profiles:
     model: fable
     maxBudgetUsd: 2
     maxTurns: 5
+    permissionMode: acceptEdits
     environment:
       FIXTURE_TOKEN: { fromEnv: FIXTURE_SECRET }
   generic-agent:
@@ -136,10 +150,11 @@ profiles:
 function claudeScript(): string {
   return `#!/usr/bin/env node
 const args = process.argv.slice(2);
-const isolated = process.env.FIXTURE_TOKEN === "never-print-this-value"
+  const isolated = process.env.FIXTURE_TOKEN === "never-print-this-value"
   && args.includes("--strict-mcp-config")
   && args.includes("--no-chrome")
   && args.includes("--no-session-persistence")
+  && args[args.indexOf("--permission-mode") + 1] === "acceptEdits"
   && args[args.indexOf("--setting-sources") + 1] === "";
 process.stdout.write(JSON.stringify({
   result: isolated ? "isolated" : "unsafe",

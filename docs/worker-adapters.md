@@ -44,6 +44,11 @@ The loader resolves the value only in memory. Status output reports the source v
 the value. Inline environment values, missing variables, unknown fields/adapters, duplicate profile
 ids, and executable strings containing shell syntax fail closed.
 
+Claude permission mode is also explicit. `dontAsk` is the default and auto-denies operations that
+would prompt in a headless run. `acceptEdits` allows file Write/Edit operations inside the isolated
+worktree while retaining normal permission checks for other tools. `bypassPermissions` is not a
+valid profile value.
+
 ## Native adapters
 
 `ClaudeCodeWorker` invokes Claude Code with explicit model, tool, permission, setting-source, MCP,
