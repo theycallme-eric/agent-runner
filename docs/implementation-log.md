@@ -334,3 +334,17 @@ transcripts or secrets here.
   contents from durable execution/delivery records.
 - Next open decision: review launch settings and run a short supervised `--max-new-claims 1` dogfood
   session before any overnight use; then add repeatable service/container packaging.
+
+### Supervised autopilot proof
+
+- Ran the public command with explicit `--enable`, two-minute deadline, global new-claim ceiling one,
+  concurrency one, one-second backoff, and a one-pass no-progress ceiling against the existing
+  Agent Runner registration.
+- Pass one reconciled DOGFOOD-01 from the prior base to autopilot commit `eeea57f`, reran required
+  verification, and updated the same draft. Pass two classified the base current and performed only
+  persisted-PR/CI observation. Both passes recorded `execution: not-run`; total new claims was zero.
+- The loop stopped itself with `no-progress` after 17.288 seconds. Its morning report included the
+  historical failed permission attempt and successful run, both worker/model/session identities,
+  durations, combined local usage estimate, draft PR #8 with CI `none`, and issue #7 as remaining.
+- No model, duplicate branch/PR, merge, or background schedule was launched. The next gate is
+  repeatable service/container packaging followed by a second small-project portability proof.

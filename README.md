@@ -130,5 +130,5 @@ will add only the adapter after the controller passes its simulator and fixture-
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License: not selected yet
-- Next decision gate: review the bounded launch settings, run the first supervised short autopilot,
-  then package the controller for a repeatable local service/container
+- Next decision gate: package the controller for a repeatable local service/container, then onboard a
+  second small project as the portability proof before CLEAR

@@ -219,7 +219,9 @@ export class AutopilotController {
         completed: rows.filter((run) => run.state === "completed").length,
         waitingHuman: rows.filter((run) => run.state === "waiting-human").length,
         failed: rows.filter((run) => run.state === "failed").length,
-        estimatedCostUsd: rows.reduce((total, run) => total + (run.costUsd ?? 0), 0),
+        estimatedCostUsd: roundUsage(
+          rows.reduce((total, run) => total + (run.costUsd ?? 0), 0),
+        ),
       },
       runs: rows,
       remaining: [...latest.entries()].map(([projectId, result]) => ({
@@ -273,4 +275,8 @@ function validateRequest(request: AutopilotRequest): void {
   if (request.globalConcurrency !== 1) {
     throw new Error("The first unattended version requires global concurrency one");
   }
+}
+
+function roundUsage(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
 }
