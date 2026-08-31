@@ -15,7 +15,8 @@ SQLite. It also simulates controller-owned verification, base synchronization, C
 gates. The concrete execution service now connects a claim to an exact-base worktree, a selected
 worker adapter, independent commands, a locally committed verified head, and durable evidence. Real
 unattended CLI execution remains disabled until profile loading, reconciliation, and delivery are
-connected. GitHub issue and dependency discovery is read-only, and nothing runs in the background.
+connected through one command. GitHub issue/dependency discovery and idempotent draft-PR publication
+adapters exist, but nothing runs in the background.
 
 ## Start here
 
@@ -25,6 +26,7 @@ connected. GitHub issue and dependency discovery is read-only, and nothing runs 
 | [Project onboarding](docs/project-onboarding.md) | Multi-project registry and task/DAG plug-in boundary |
 | [GitHub adapter](docs/github-adapter.md) | Issue selection, native dependencies, and normalization rules |
 | [Worker adapters](docs/worker-adapters.md) | Agent-neutral protocol and provider adapter boundary |
+| [Draft-PR delivery](docs/delivery.md) | Idempotent publication, persisted evidence, and CI states |
 | [Landscape](docs/landscape.md) | Recent systems reviewed and the current adopt/evaluate/build decisions |
 | [Implementation log](docs/implementation-log.md) | Chronological decisions, problems, and corrections across sessions |
 | [AGENTS.md](AGENTS.md) | Entry point for coding agents working on this repository |
@@ -106,5 +108,5 @@ will add only the adapter after the controller passes its simulator and fixture-
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License: not selected yet
-- Next decision gate: publish a verified workspace as one idempotent draft pull request, then expose
-  the joined plan/execution/delivery flow through an explicit controller command
+- Next decision gate: load controller-owned worker profiles and expose the joined
+  plan/execution/delivery flow through an explicit one-shot command

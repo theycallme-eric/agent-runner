@@ -7,6 +7,8 @@ import {
   type ClaimRequest,
   type ClaimResult,
   type ReclaimResult,
+  type DeliveryCiStatus,
+  type RunDeliveryRecord,
   type RunExecutionRecord,
   type RunRecord,
   type RunState,
@@ -60,6 +62,20 @@ interface RunExecutionRow {
   updated_at: number;
 }
 
+interface RunDeliveryRow {
+  run_id: string;
+  provider: string;
+  external_id: string;
+  url: string;
+  branch_name: string;
+  base_branch: string;
+  base_sha: string;
+  head_sha: string;
+  draft: number;
+  ci_status: string;
+  updated_at: number;
+}
+
 export interface WorkspaceEvidence {
   workspacePath: string;
   branchName: string;
@@ -74,6 +90,18 @@ export interface WorkerEvidence {
   summary: string;
   costUsd: number | null;
   durationMs: number;
+}
+
+export interface DeliveryEvidence {
+  provider: string;
+  externalId: string;
+  url: string;
+  branchName: string;
+  baseBranch: string;
+  baseSha: string;
+  headSha: string;
+  draft: boolean;
+  ciStatus: DeliveryCiStatus;
 }
 
 export interface TransitionPatch {
@@ -405,6 +433,66 @@ export class RunStore {
     return row ? mapExecution(row) : null;
   }
 
+  recordDelivery(runId: string, evidence: DeliveryEvidence, now: number): void {
+    this.#require(runId);
+    validateCiStatus(evidence.ciStatus);
+    this.#database
+      .prepare(`
+        INSERT INTO run_delivery (
+          run_id, provider, external_id, url, branch_name, base_branch,
+          base_sha, head_sha, draft, ci_status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id) DO UPDATE SET
+          provider = excluded.provider,
+          external_id = excluded.external_id,
+          url = excluded.url,
+          branch_name = excluded.branch_name,
+          base_branch = excluded.base_branch,
+          base_sha = excluded.base_sha,
+          head_sha = excluded.head_sha,
+          draft = excluded.draft,
+          ci_status = excluded.ci_status,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        runId,
+        evidence.provider,
+        evidence.externalId,
+        evidence.url,
+        evidence.branchName,
+        evidence.baseBranch,
+        evidence.baseSha,
+        evidence.headSha,
+        Number(evidence.draft),
+        evidence.ciStatus,
+        now,
+      );
+    this.#event(runId, now, "delivery-recorded", evidence);
+  }
+
+  updateDeliveryCi(runId: string, ciStatus: DeliveryCiStatus, now: number): RunDeliveryRecord {
+    validateCiStatus(ciStatus);
+    const result = this.#database
+      .prepare("UPDATE run_delivery SET ci_status = ?, updated_at = ? WHERE run_id = ?")
+      .run(ciStatus, now, runId);
+    if (result.changes !== 1) {
+      throw new Error(`Run ${runId} has no delivery record`);
+    }
+    this.#event(runId, now, "delivery-ci", { status: ciStatus });
+    const delivery = this.delivery(runId);
+    if (!delivery) {
+      throw new Error(`Run ${runId} delivery disappeared after CI update`);
+    }
+    return delivery;
+  }
+
+  delivery(runId: string): RunDeliveryRecord | null {
+    const row = this.#database
+      .prepare("SELECT * FROM run_delivery WHERE run_id = ?")
+      .get(runId) as RunDeliveryRow | undefined;
+    return row ? mapDelivery(row) : null;
+  }
+
   #migrate(): void {
     this.#database.exec(`
       CREATE TABLE IF NOT EXISTS runs (
@@ -446,6 +534,20 @@ export class RunStore {
         worker_summary TEXT,
         worker_cost_usd REAL,
         worker_duration_ms INTEGER,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS run_delivery (
+        run_id TEXT PRIMARY KEY REFERENCES runs(id),
+        provider TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        url TEXT NOT NULL,
+        branch_name TEXT NOT NULL,
+        base_branch TEXT NOT NULL,
+        base_sha TEXT NOT NULL,
+        head_sha TEXT NOT NULL,
+        draft INTEGER NOT NULL,
+        ci_status TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
     `);
@@ -526,4 +628,27 @@ function mapExecution(row: RunExecutionRow): RunExecutionRecord {
     workerDurationMs: row.worker_duration_ms,
     updatedAt: row.updated_at,
   };
+}
+
+function mapDelivery(row: RunDeliveryRow): RunDeliveryRecord {
+  validateCiStatus(row.ci_status);
+  return {
+    runId: row.run_id,
+    provider: row.provider,
+    externalId: row.external_id,
+    url: row.url,
+    branchName: row.branch_name,
+    baseBranch: row.base_branch,
+    baseSha: row.base_sha,
+    headSha: row.head_sha,
+    draft: row.draft === 1,
+    ciStatus: row.ci_status as DeliveryCiStatus,
+    updatedAt: row.updated_at,
+  };
+}
+
+function validateCiStatus(value: string): asserts value is DeliveryCiStatus {
+  if (!["none", "pending", "passed", "failed"].includes(value)) {
+    throw new Error(`Invalid delivery CI status: ${value}`);
+  }
 }

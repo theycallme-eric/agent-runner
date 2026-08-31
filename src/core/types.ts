@@ -51,6 +51,22 @@ export interface RunExecutionRecord {
   updatedAt: number;
 }
 
+export type DeliveryCiStatus = "none" | "pending" | "passed" | "failed";
+
+export interface RunDeliveryRecord {
+  runId: string;
+  provider: string;
+  externalId: string;
+  url: string;
+  branchName: string;
+  baseBranch: string;
+  baseSha: string;
+  headSha: string;
+  draft: boolean;
+  ciStatus: DeliveryCiStatus;
+  updatedAt: number;
+}
+
 export interface ClaimRequest extends TaskRef {
   workerId: string;
   now: number;

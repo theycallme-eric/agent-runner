@@ -111,10 +111,12 @@ The concrete execution service joins an atomic claim, exact-base worktree, contr
 `WorkerAdapter`, independent setup and verification commands, protected-path gate, local commit, and
 durable workspace/session/head evidence. It rejects worker crashes, timeouts, false success without
 changes, verification failure, and a base that advances before the verified head is recorded. GitHub
-issue and native-dependency discovery works through the same plug-in boundary. The unresolved
-portion is a successful isolated real-worker session, base-advance reconciliation rather than safe
-failure, and draft pull-request publication. Those belong in repository-owned dogfood experiments,
-not in CLEAR.
+issue and native-dependency discovery works through the same plug-in boundary. A provider-neutral
+delivery coordinator now reconciles one draft pull request per verified branch, persists its identity
+and CI state, and rejects failed CI or non-draft publication. The unresolved portion is a successful
+isolated real-worker session, base-advance reconciliation rather than safe failure, the joined public
+run command, and live draft-PR evidence. Those belong in repository-owned dogfood experiments, not
+in CLEAR.
 
 Real workers remain fail-closed. The first Claude/Fable smoke test revealed that inherited MCP state
 can break a headless run and that `--max-budget-usd` is a stop condition rather than an enforceable

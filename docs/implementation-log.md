@@ -144,3 +144,24 @@ transcripts or secrets here.
   crash/no-change rejection, verification failure, protected-path gating, and base-advance rejection.
 - Next open decision: implement DELIVERY-01 as idempotent draft-pull-request publication, then expose
   the joined path through controller profile configuration and an explicit run command.
+
+## 2026-08-31 — Idempotent draft pull-request delivery
+
+- Published RUN-01 in commit `f80ea25`, closed the corresponding GitHub issue with evidence, and
+  re-read the live DAG. GitHub then reported RUN-01 completed and DELIVERY-01 ready with the same one
+  dependency edge, proving the repository-owned graph advanced rather than being manually reordered.
+- Added a provider-neutral `PullRequestPublisher` and delivery coordinator. Only a clean, non-empty,
+  verified workspace at the still-current base may reach publication; protected paths remain gated.
+- Added durable pull-request provider/id/URL/branch/base/head/draft/CI evidence. Publication and CI
+  observation errors remain retryable because a controller can stop after the remote side succeeds
+  but before local persistence.
+- Added a GitHub publisher that verifies and pushes the exact head, creates or reconciles one open
+  pull request per runner branch, forces that runner-owned pull request back to draft when necessary,
+  updates its description, and normalizes required check buckets. It has no merge operation.
+- Added restart/idempotency evidence: a simulated post-create controller failure recovers the same
+  external pull request, repeated CI polling never creates a duplicate, failed CI cannot complete,
+  and a non-draft response fails closed.
+- Evidence: 52 deterministic tests pass, including a fake `gh`/`git` integration that creates once,
+  reconciles twice, pushes the verified head, and reports required CI without network access.
+- Next open decision: load controller-owned worker profiles, join plan → execute → deliver in a
+  one-shot command, then publish a real repository-owned dogfood draft pull request through it.
