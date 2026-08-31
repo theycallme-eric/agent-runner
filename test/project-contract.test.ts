@@ -18,6 +18,16 @@ test("accepts the fixture project contract", () => {
     "npm run build",
   ]);
   assert.equal(contract.delivery.merge, "never");
+  assert.equal(contract.delivery.provider, "github");
+});
+
+test("delivery providers are replaceable without changing lifecycle policy", () => {
+  const configured = fixture.replace(
+    "delivery:\n  pullRequest: true",
+    "delivery:\n  provider: gitlab\n  pullRequest: true",
+  );
+
+  assert.equal(parseProjectContract(configured).delivery.provider, "gitlab");
 });
 
 test("rejects unknown fields so configuration typos fail closed", () => {

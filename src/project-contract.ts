@@ -29,6 +29,7 @@ export interface ProjectContract {
     timeoutMinutes: number;
   };
   delivery: {
+    provider: string;
     pullRequest: boolean;
     merge: "never";
   };
@@ -75,7 +76,7 @@ export function parseProjectContract(source: string): ProjectContract {
   exactKeys(execution, ["concurrency", "attempts", "timeoutMinutes"], "execution");
 
   const delivery = objectAt(root.delivery, "delivery");
-  exactKeys(delivery, ["pullRequest", "merge"], "delivery");
+  allowedKeys(delivery, ["provider", "pullRequest", "merge"], ["pullRequest", "merge"], "delivery");
   literal(delivery.merge, "never", "delivery.merge");
 
   return {
@@ -102,6 +103,9 @@ export function parseProjectContract(source: string): ProjectContract {
       timeoutMinutes: positiveIntegerAt(execution.timeoutMinutes, "execution.timeoutMinutes"),
     },
     delivery: {
+      provider: delivery.provider === undefined
+        ? pluginIdAt(tasks.provider, "tasks.provider")
+        : pluginIdAt(delivery.provider, "delivery.provider"),
       pullRequest: booleanAt(delivery.pullRequest, "delivery.pullRequest"),
       merge: "never",
     },

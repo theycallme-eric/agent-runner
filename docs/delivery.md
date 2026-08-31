@@ -27,7 +27,7 @@ being treated as success. The adapter never invokes merge, auto-merge, or branch
 
 ## Current boundary
 
-The delivery service and deterministic fake-forge coverage are executable, but the public CLI does
-not launch it yet. Worker-profile loading, the joined run command, remote-base refresh, and periodic
-CI reconciliation are the next controller slice. A real GitHub draft pull request is intentionally
-deferred until that joined command can produce the verified workspace it publishes.
+`run-once` now launches delivery after independent verification and re-polls the same draft for
+duplicate task revisions at `verified`, `pr-open`, or `ci`. The joined fake-GitHub CLI fixture proves
+pending CI advances on a later invocation without a second worker run or pull request. General stale
+run recovery, base synchronization, and periodic reconciliation remain separate work.

@@ -5,6 +5,7 @@ import type { ProjectContract } from "../project-contract.js";
 import type { ProjectRegistration } from "../projects/types.js";
 import type { TaskNode } from "../tasks/types.js";
 import type { WorkspaceRepository } from "../workspaces/git-repository.js";
+import type { BaseRevisionProvider } from "../workspaces/base-revision.js";
 import type {
   DraftPullRequestRequest,
   PullRequestPublisher,
@@ -27,6 +28,7 @@ export interface DeliveryResult {
 
 export interface DeliveryCoordinatorOptions {
   now?: () => number;
+  baseRevisions?: BaseRevisionProvider;
 }
 
 export class DeliveryCoordinator {
@@ -34,6 +36,7 @@ export class DeliveryCoordinator {
   readonly #repository: WorkspaceRepository;
   readonly #publisher: PullRequestPublisher;
   readonly #now: () => number;
+  readonly #baseRevisions: BaseRevisionProvider;
 
   constructor(
     runs: RunStore,
@@ -45,6 +48,10 @@ export class DeliveryCoordinator {
     this.#repository = repository;
     this.#publisher = publisher;
     this.#now = options.now ?? Date.now;
+    this.#baseRevisions = options.baseRevisions ?? {
+      inspect: (repositoryPath, baseBranch) => this.#repository.resolveRef(repositoryPath, baseBranch),
+      refresh: (repositoryPath, baseBranch) => this.#repository.resolveRef(repositoryPath, baseBranch),
+    };
   }
 
   async deliver(request: DeliverTaskRequest): Promise<DeliveryResult> {
@@ -105,7 +112,7 @@ export class DeliveryCoordinator {
       };
     }
 
-    const currentBaseSha = await this.#repository.resolveRef(
+    const currentBaseSha = await this.#baseRevisions.inspect(
       request.project.rootPath,
       request.contract.project.baseBranch,
     );

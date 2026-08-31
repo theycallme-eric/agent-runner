@@ -11,9 +11,11 @@ const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export class GitWorktreeManager implements WorkspaceManager {
   readonly #root: string;
+  readonly #gitExecutable: string;
 
-  constructor(root: string) {
+  constructor(root: string, gitExecutable = "git") {
     this.#root = resolve(root);
+    this.#gitExecutable = gitExecutable;
   }
 
   async create(request: WorkspaceRequest): Promise<WorkspaceRecord> {
@@ -24,8 +26,8 @@ export class GitWorktreeManager implements WorkspaceManager {
       throw new Error("Workspace path escaped its configured root");
     }
 
-    const baseSha = await git(request.repositoryPath, ["rev-parse", "--verify", request.baseRef]);
-    await git(request.repositoryPath, [
+    const baseSha = await git(this.#gitExecutable, request.repositoryPath, ["rev-parse", "--verify", request.baseRef]);
+    await git(this.#gitExecutable, request.repositoryPath, [
       "worktree",
       "add",
       "--no-track",
@@ -34,7 +36,7 @@ export class GitWorktreeManager implements WorkspaceManager {
       workspacePath,
       baseSha,
     ]);
-    const workspaceHead = await git(workspacePath, ["rev-parse", "HEAD"]);
+    const workspaceHead = await git(this.#gitExecutable, workspacePath, ["rev-parse", "HEAD"]);
     if (workspaceHead !== baseSha) {
       throw new Error(`Workspace HEAD ${workspaceHead} does not match selected base ${baseSha}`);
     }
@@ -54,8 +56,8 @@ function validateRequest(request: WorkspaceRequest): void {
   }
 }
 
-async function git(cwd: string, argumentsList: string[]): Promise<string> {
-  const result = await execFileAsync("git", argumentsList, {
+async function git(executable: string, cwd: string, argumentsList: string[]): Promise<string> {
+  const result = await execFileAsync(executable, argumentsList, {
     cwd,
     encoding: "utf8",
     maxBuffer: 1_000_000,

@@ -17,17 +17,23 @@ export interface WorkspaceRepository {
 }
 
 export class GitWorkspaceRepository implements WorkspaceRepository {
+  readonly #gitExecutable: string;
+
+  constructor(gitExecutable = "git") {
+    this.#gitExecutable = gitExecutable;
+  }
+
   resolveRef(repositoryPath: string, ref: string): Promise<string> {
-    return gitText(repositoryPath, ["rev-parse", "--verify", ref]);
+    return gitText(this.#gitExecutable, repositoryPath, ["rev-parse", "--verify", ref]);
   }
 
   async snapshot(workspacePath: string, baseSha: string): Promise<WorkspaceSnapshot> {
     const [headSha, committed, modified, untracked, status] = await Promise.all([
-      gitText(workspacePath, ["rev-parse", "HEAD"]),
-      gitRaw(workspacePath, ["diff", "--name-only", "-z", `${baseSha}..HEAD`]),
-      gitRaw(workspacePath, ["diff", "--name-only", "-z"]),
-      gitRaw(workspacePath, ["ls-files", "--others", "--exclude-standard", "-z"]),
-      gitRaw(workspacePath, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+      gitText(this.#gitExecutable, workspacePath, ["rev-parse", "HEAD"]),
+      gitRaw(this.#gitExecutable, workspacePath, ["diff", "--name-only", "-z", `${baseSha}..HEAD`]),
+      gitRaw(this.#gitExecutable, workspacePath, ["diff", "--name-only", "-z"]),
+      gitRaw(this.#gitExecutable, workspacePath, ["ls-files", "--others", "--exclude-standard", "-z"]),
+      gitRaw(this.#gitExecutable, workspacePath, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
     ]);
     const changedPaths = [...new Set([
       ...nulList(committed),
@@ -41,10 +47,10 @@ export class GitWorkspaceRepository implements WorkspaceRepository {
     if (message.trim() === "") {
       throw new Error("Commit message must be non-empty");
     }
-    const status = await gitRaw(workspacePath, ["status", "--porcelain=v1", "-z"]);
+    const status = await gitRaw(this.#gitExecutable, workspacePath, ["status", "--porcelain=v1", "-z"]);
     if (status !== "") {
-      await gitRaw(workspacePath, ["add", "--all"]);
-      await gitRaw(workspacePath, [
+      await gitRaw(this.#gitExecutable, workspacePath, ["add", "--all"]);
+      await gitRaw(this.#gitExecutable, workspacePath, [
         "-c",
         "user.name=Agent Runner",
         "-c",
@@ -55,7 +61,7 @@ export class GitWorkspaceRepository implements WorkspaceRepository {
         message,
       ]);
     }
-    return gitText(workspacePath, ["rev-parse", "HEAD"]);
+    return gitText(this.#gitExecutable, workspacePath, ["rev-parse", "HEAD"]);
   }
 }
 
@@ -63,8 +69,8 @@ function nulList(value: string): string[] {
   return value.split("\0").filter((entry) => entry !== "");
 }
 
-async function gitRaw(cwd: string, argumentsList: string[]): Promise<string> {
-  const result = await execFileAsync("git", argumentsList, {
+async function gitRaw(executable: string, cwd: string, argumentsList: string[]): Promise<string> {
+  const result = await execFileAsync(executable, argumentsList, {
     cwd,
     encoding: "utf8",
     maxBuffer: MAX_CAPTURE_BYTES,
@@ -72,6 +78,6 @@ async function gitRaw(cwd: string, argumentsList: string[]): Promise<string> {
   return result.stdout;
 }
 
-async function gitText(cwd: string, argumentsList: string[]): Promise<string> {
-  return (await gitRaw(cwd, argumentsList)).trim();
+async function gitText(executable: string, cwd: string, argumentsList: string[]): Promise<string> {
+  return (await gitRaw(executable, cwd, argumentsList)).trim();
 }

@@ -50,6 +50,7 @@ execution:
   attempts: 2
   timeoutMinutes: 120
 delivery:
+  provider: github
   pullRequest: true
   merge: never
 ```
@@ -114,9 +115,13 @@ changes, verification failure, and a base that advances before the verified head
 issue and native-dependency discovery works through the same plug-in boundary. A provider-neutral
 delivery coordinator now reconciles one draft pull request per verified branch, persists its identity
 and CI state, and rejects failed CI or non-draft publication. The unresolved portion is a successful
-isolated real-worker session, base-advance reconciliation rather than safe failure, the joined public
-run command, and live draft-PR evidence. Those belong in repository-owned dogfood experiments, not
-in CLEAR.
+isolated real-worker session, base-advance reconciliation rather than safe failure, and live draft-PR
+evidence. Those belong in repository-owned dogfood experiments, not in CLEAR.
+
+`run-once` is the first joined public surface. It refreshes `origin/<base>` before claiming and uses
+read-only `ls-remote` checks during execution/delivery, avoiding the stale-local-branch assumption.
+Dry run resolves the remote base and DAG without claims or external writes. Repeated task revisions
+at delivery states reconcile the persisted draft and CI without relaunching a worker.
 
 Real workers remain fail-closed. The first Claude/Fable smoke test revealed that inherited MCP state
 can break a headless run and that `--max-budget-usd` is a stop condition rather than an enforceable

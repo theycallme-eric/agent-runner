@@ -45,6 +45,15 @@ tasks:
     includeLabels: [agent:task]
 ```
 
+Delivery selects its own plug-in so task discovery and pull-request hosting are not coupled:
+
+```yaml
+delivery:
+  provider: github
+  pullRequest: true
+  merge: never
+```
+
 The task provider normalizes task id, revision, title, prompt, status, and dependency references. The
 dependency resolver may preserve those references or derive them from another source. Neither name
 is hard-coded in the contract parser. `config` is an optional provider-owned object; the core stores
@@ -61,5 +70,6 @@ and retry limit. Claims are unique by project, task id, and task revision. Per-p
 checked in the same SQLite transaction as the claim, so separate controller processes cannot exceed
 the declared worker capacity.
 
-Registration and readiness do not launch a coding agent. Execution remains a later, explicit phase
-that consumes the claimed task through the normalized worker interface.
+Registration, profile listing, readiness, and `run-once --dry-run` do not launch a coding agent.
+Mutating execution begins only at explicit `run-once`, which consumes claims through the normalized
+worker interface and can publish drafts through the separately selected delivery adapter.

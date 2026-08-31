@@ -24,5 +24,6 @@ execution:
   attempts: 2
   timeoutMinutes: 120
 delivery:
+  provider: github
   pullRequest: true
   merge: never

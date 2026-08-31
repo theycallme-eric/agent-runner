@@ -186,3 +186,27 @@ transcripts or secrets here.
   a sentinel secret reaches each process but is absent from profile summaries and CLI output.
 - Next open decision: publish PROFILE-01, then implement CLI-01 by joining the existing planner,
   executor, delivery coordinator, profile loader, and GitHub adapters behind `run-once`/`--dry-run`.
+
+## 2026-08-31 — Joined one-shot controller command
+
+- Added delivery-provider selection to the project contract and a provider-neutral publisher
+  registry. It defaults to the task provider for existing v1 contracts but may be selected explicitly.
+- Added `run-once`: it loads one registered project and local profile, refreshes the remote base,
+  validates the live DAG, atomically claims up to an explicit limit and project concurrency, runs
+  claims through isolated execution/verification, and publishes or reconciles draft pull requests.
+- Added `--dry-run`, which inspects the same remote base, DAG, worker profile, and delivery adapter but
+  cannot claim, create a worktree, launch a worker, push, or publish.
+- The first wiring used the local base-branch ref and inspected the live graph once before asking the
+  planner to inspect it again. That could treat a stale local branch as current and introduce drift
+  between the reported and claimed snapshots. Corrected it with a remote-base provider (`ls-remote`
+  for inspection, explicit fetch for execution) and one graph read per mutating plan.
+- Added bounded claim limits below project concurrency. New claims execute independently; any task or
+  delivery failure leaves a complete structured batch result, sets `ok: false`, and exits non-zero.
+- Repeated task revisions at `verified`, `pr-open`, or `ci` now re-poll/reconcile the persisted draft
+  without relaunching a worker. Broader stale-run recovery remains RECON-01.
+- Evidence: 58 deterministic tests pass. The full CLI fixture uses a real local Git remote/worktree,
+  fake GitHub issue/PR/check APIs, and a fake JSON worker to prove dry-run isolation, remote-base
+  fetch, one claim, independent shell verification, one draft PR, pending CI, and a later no-worker
+  reconciliation to passing CI without another PR.
+- Next open decision: publish CLI-01, configure the local `claude-fable` profile, run a live dry-run,
+  and execute DOGFOOD-01 as the first real repository-owned draft pull request.
