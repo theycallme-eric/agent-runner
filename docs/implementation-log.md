@@ -305,3 +305,12 @@ transcripts or secrets here.
   retained; no worker ran. `npm run check`, `npm test`, and `npm run build` passed after the merge.
   The controller updated draft PR #8 by persisted id, reduced its task diff to
   `docs/dogfood-runbook.md`, observed CI `none`, released its lease, and created no claim or PR.
+- Stage two restored the reconciliation link on main and advanced the same durable run to base
+  `b290982` and verified head `595e430`. The controller again reran all three required commands,
+  updated PR #8 in place, retained its draft state, and made no worker call or claim.
+- A third pass at the same base performed observation and CI polling only: base classified `current`,
+  execution `not-run`, the persisted workspace/session/branch/PR all matched, and CI remained `none`.
+  GitHub reported PR #8 open, draft, cleanly mergeable, and containing only
+  `docs/dogfood-runbook.md`. No automatic merge or completion was attempted.
+- RECON-01 exit: deterministic verification plus live repeated convergence now satisfy the restart,
+  identity, base, reverification, conflict, and CI-polling gate. AUTO-01 is the next controller layer.

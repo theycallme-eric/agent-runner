@@ -123,5 +123,4 @@ will add only the adapter after the controller passes its simulator and fixture-
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License: not selected yet
-- Next decision gate: prove restart/base reconciliation against the live dogfood draft, then add the
-  bounded multi-project scheduler and morning report
+- Next decision gate: add the explicitly enabled bounded multi-project scheduler and morning report
