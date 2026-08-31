@@ -1,19 +1,13 @@
 export interface WorkerRequest {
   workspacePath: string;
   prompt: string;
-  model: string;
-  maxBudgetUsd: number;
-  maxTurns: number;
   timeoutMs: number;
-  tools: string[];
-  settingSources: Array<"user" | "project" | "local">;
-  persistSession: boolean;
 }
 
 export interface WorkerOutcome {
   status: "succeeded" | "failed" | "timed-out";
   worker: string;
-  model: string;
+  model: string | null;
   sessionId: string | null;
   summary: string;
   costUsd: number | null;

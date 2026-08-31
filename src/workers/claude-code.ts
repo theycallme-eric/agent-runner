@@ -12,12 +12,23 @@ interface ClaudeJsonResult {
   duration_ms?: unknown;
 }
 
+export interface ClaudeCodeWorkerOptions {
+  executable?: string;
+  model: string;
+  maxBudgetUsd: number;
+  maxTurns: number;
+  tools: string[];
+  settingSources: Array<"user" | "project" | "local">;
+  persistSession: boolean;
+}
+
 export class ClaudeCodeWorker implements WorkerAdapter {
   readonly name = "claude-code";
-  readonly #executable: string;
+  readonly #options: Required<ClaudeCodeWorkerOptions>;
 
-  constructor(executable = "claude") {
-    this.#executable = executable;
+  constructor(options: ClaudeCodeWorkerOptions) {
+    validateOptions(options);
+    this.#options = { ...options, executable: options.executable ?? "claude" };
   }
 
   run(request: WorkerRequest): Promise<WorkerOutcome> {
@@ -27,31 +38,31 @@ export class ClaudeCodeWorker implements WorkerAdapter {
       "--print",
       request.prompt,
       "--model",
-      request.model,
+      this.#options.model,
       "--output-format",
       "json",
       "--permission-mode",
       "dontAsk",
       "--max-budget-usd",
-      String(request.maxBudgetUsd),
+      String(this.#options.maxBudgetUsd),
       "--max-turns",
-      String(request.maxTurns),
+      String(this.#options.maxTurns),
       "--tools",
-      request.tools.join(","),
+      this.#options.tools.join(","),
       "--setting-sources",
-      request.settingSources.join(","),
+      this.#options.settingSources.join(","),
       "--strict-mcp-config",
       "--mcp-config",
       '{"mcpServers":{}}',
       "--no-chrome",
       "--disable-slash-commands",
     ];
-    if (!request.persistSession) {
+    if (!this.#options.persistSession) {
       argumentsList.push("--no-session-persistence");
     }
 
     return new Promise((resolve, reject) => {
-      const child = spawn(this.#executable, argumentsList, {
+      const child = spawn(this.#options.executable, argumentsList, {
         cwd: request.workspacePath,
         env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
         stdio: ["ignore", "pipe", "pipe"],
@@ -83,7 +94,7 @@ export class ClaudeCodeWorker implements WorkerAdapter {
           resolve({
             status: "timed-out",
             worker: this.name,
-            model: request.model,
+            model: this.#options.model,
             sessionId: null,
             summary: `Claude Code exceeded ${request.timeoutMs}ms`,
             costUsd: null,
@@ -97,7 +108,7 @@ export class ClaudeCodeWorker implements WorkerAdapter {
           resolve({
             status: "failed",
             worker: this.name,
-            model: request.model,
+            model: this.#options.model,
             sessionId: stringOrNull(parsed?.session_id),
             summary: failureSummary(exitCode, parsed, stderr),
             costUsd: numberOrNull(parsed?.total_cost_usd),
@@ -109,7 +120,7 @@ export class ClaudeCodeWorker implements WorkerAdapter {
         resolve({
           status: "succeeded",
           worker: this.name,
-          model: request.model,
+          model: this.#options.model,
           sessionId: stringOrNull(parsed.session_id),
           summary: stringOrNull(parsed.result) ?? "Claude Code completed without a text result",
           costUsd: numberOrNull(parsed.total_cost_usd),
@@ -121,20 +132,23 @@ export class ClaudeCodeWorker implements WorkerAdapter {
 }
 
 function validateRequest(request: WorkerRequest): void {
-  if (!Number.isFinite(request.maxBudgetUsd) || request.maxBudgetUsd <= 0) {
-    throw new Error("maxBudgetUsd must be greater than zero");
-  }
   if (!Number.isInteger(request.timeoutMs) || request.timeoutMs < 1) {
     throw new Error("timeoutMs must be a positive integer");
   }
-  if (!Number.isInteger(request.maxTurns) || request.maxTurns < 1) {
-    throw new Error("maxTurns must be a positive integer");
-  }
-  if (request.model.trim() === "") {
-    throw new Error("model must be non-empty");
-  }
   if (request.prompt.trim() === "") {
     throw new Error("prompt must be non-empty");
+  }
+}
+
+function validateOptions(options: ClaudeCodeWorkerOptions): void {
+  if (!Number.isFinite(options.maxBudgetUsd) || options.maxBudgetUsd <= 0) {
+    throw new Error("maxBudgetUsd must be greater than zero");
+  }
+  if (!Number.isInteger(options.maxTurns) || options.maxTurns < 1) {
+    throw new Error("maxTurns must be a positive integer");
+  }
+  if (options.model.trim() === "") {
+    throw new Error("model must be non-empty");
   }
 }
 

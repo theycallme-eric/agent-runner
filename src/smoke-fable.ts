@@ -2,17 +2,19 @@
 
 import { ClaudeCodeWorker } from "./workers/claude-code.js";
 
-const worker = new ClaudeCodeWorker(process.env.AGENT_RUNNER_CLAUDE_BIN ?? "claude");
-const outcome = await worker.run({
-  workspacePath: process.cwd(),
-  prompt: "Reply with exactly FABLE_READY. Do not inspect, create, edit, or delete any files.",
+const worker = new ClaudeCodeWorker({
+  executable: process.env.AGENT_RUNNER_CLAUDE_BIN ?? "claude",
   model: "fable",
   maxBudgetUsd: 0.1,
   maxTurns: 1,
-  timeoutMs: 120_000,
   tools: [],
   settingSources: [],
   persistSession: false,
+});
+const outcome = await worker.run({
+  workspacePath: process.cwd(),
+  prompt: "Reply with exactly FABLE_READY. Do not inspect, create, edit, or delete any files.",
+  timeoutMs: 120_000,
 });
 
 console.log(

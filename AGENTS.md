@@ -5,6 +5,8 @@ Read `README.md`, `docs/architecture.md`, and `docs/landscape.md` before changin
 The controller must remain project- and model-agnostic. Do not add CLEAR-specific behavior to core
 code; represent it through a project adapter or fixture. Prefer adopting stable, permissively
 licensed components over recreating agent runtimes, worktree managers, or specification systems.
+Provider-specific configuration and output parsing belong under `src/workers/`. The controller core
+must depend only on `WorkerAdapter`; changes to one coding agent must not alter the project contract.
 
 Reliability claims require deterministic evidence. Simulator coverage must include duplicate claims,
 worker crashes, controller restarts, stale leases, advanced base branches, invalid worker success,

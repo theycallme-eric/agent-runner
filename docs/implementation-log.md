@@ -66,3 +66,17 @@ transcripts or secrets here.
   executable test; no second paid probe was made.
 - Next open decision: finish the isolated Max-authenticated worker probe, add plan-quota-aware
   concurrency handling, then publish a disposable draft PR through a fixture GitHub repository.
+
+## 2026-08-31 — Public and agent-neutral boundary
+
+- User selected public visibility for the reusable Agent Runner repository and clarified that Fable
+  is CLEAR's initial worker, not a controller dependency.
+- Audited the worker boundary before publication. The shared request still contained Claude-only
+  fields such as model, dollar budget, turn limits, tools, and setting sources.
+- Moved those fields into `ClaudeCodeWorker`. The lifecycle core now passes only workspace, prompt,
+  and wall-clock timeout through `WorkerAdapter`.
+- Added a versioned JSON process adapter so any coding-agent CLI or SDK wrapper can participate
+  without modifying project contracts or controller state. Added deterministic protocol coverage;
+  the suite now has 18 tests.
+- Public repository target: `https://github.com/theycallme-eric/agent-runner`. No license was selected
+  implicitly; public visibility and open-source licensing remain separate decisions.

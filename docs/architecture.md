@@ -57,6 +57,10 @@ delivery:
 Worker/model selection belongs to controller or user configuration rather than the project contract.
 Secrets never belong in the contract.
 
+The lifecycle core depends only on the normalized `WorkerAdapter` contract. Native adapters may use
+provider-specific features; the versioned JSON process adapter provides a universal wrapper path for
+other CLIs and SDKs. See [Worker adapters](worker-adapters.md).
+
 ## Durable lifecycle
 
 ```text

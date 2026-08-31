@@ -31,17 +31,19 @@ process.stdout.write(JSON.stringify({
   chmodSync(executable, 0o755);
 
   try {
-    const worker = new ClaudeCodeWorker(executable);
-    const result = await worker.run({
-      workspacePath: directory,
-      prompt: "Run the fixture",
+    const worker = new ClaudeCodeWorker({
+      executable,
       model: "fixture-model",
       maxBudgetUsd: 1,
       maxTurns: 3,
-      timeoutMs: 1_000,
       tools: [],
       settingSources: [],
       persistSession: false,
+    });
+    const result = await worker.run({
+      workspacePath: directory,
+      prompt: "Run the fixture",
+      timeoutMs: 1_000,
     });
 
     assert.deepEqual(result, {
@@ -58,18 +60,14 @@ process.stdout.write(JSON.stringify({
   }
 });
 
-test("rejects missing spend and timeout limits before launching Claude", () => {
-  const worker = new ClaudeCodeWorker("unused");
-
+test("rejects invalid Claude-specific limits during adapter construction", () => {
   assert.throws(
     () =>
-      worker.run({
-        workspacePath: "/tmp",
-        prompt: "Run the fixture",
+      new ClaudeCodeWorker({
+        executable: "unused",
         model: "fixture-model",
         maxBudgetUsd: 0,
         maxTurns: 0,
-        timeoutMs: 0,
         tools: [],
         settingSources: [],
         persistSession: false,

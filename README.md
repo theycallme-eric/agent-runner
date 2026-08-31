@@ -20,6 +20,7 @@ nothing here is currently running in the background.
 | Document | Purpose |
 |---|---|
 | [Architecture](docs/architecture.md) | System boundary, project contract, and first executable slice |
+| [Worker adapters](docs/worker-adapters.md) | Agent-neutral protocol and provider adapter boundary |
 | [Landscape](docs/landscape.md) | Recent systems reviewed and the current adopt/evaluate/build decisions |
 | [Implementation log](docs/implementation-log.md) | Chronological decisions, problems, and corrections across sessions |
 | [AGENTS.md](AGENTS.md) | Entry point for coding agents working on this repository |
@@ -39,6 +40,18 @@ second run, exhausted workers fail visibly, controller restarts preserve state, 
 fail closed, false worker success is rejected, advanced bases force re-verification, protected paths
 wait for a human, failing CI cannot complete a run, workers are replaceable, and a task branch starts
 in an isolated worktree at the selected base commit.
+
+## Coding-agent support
+
+The controller depends only on the `WorkerAdapter` interface. Agent- and model-specific settings do
+not appear in `.agent-runner.yml` or the lifecycle core.
+
+- `ClaudeCodeWorker` is the first native adapter; CLEAR will initially select Fable through it.
+- `JsonProcessWorker` runs any local CLI or SDK wrapper that implements the versioned JSON protocol.
+- Codex, OpenHands, and future workers can add native adapters without changing task claims,
+  workspaces, verification, delivery policy, or product repositories.
+
+Fable is a dogfood choice for CLEAR, not an Agent Runner dependency.
 
 `npm run smoke:fable` is a manual diagnostic, not part of verification or unattended execution. Set
 `AGENT_RUNNER_CLAUDE_BIN` when the intended Claude Code binary is not first on `PATH`. Do not treat
@@ -67,8 +80,7 @@ will add only the adapter after the controller passes its simulator and fixture-
 
 ## Repository status
 
-- Working name: `agent-runner`
-- Local repository only; no GitHub remote yet
+- Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License: not selected yet
 - First decision gate: connect one disposable fixture task to a real worker while evaluating whether
   an existing control plane can supply that layer without a hard fork

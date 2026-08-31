@@ -64,7 +64,7 @@ export class FixtureRunner {
         outcome: "executed",
         run: failed,
         workspace: { path: "", branchName: request.branchName, baseSha: request.claim.baseSha },
-        worker: notStarted(this.#worker.name, request.worker.model),
+        worker: notStarted(this.#worker.name),
       };
     }
 
@@ -76,7 +76,7 @@ export class FixtureRunner {
       worker = {
         status: "failed",
         worker: this.#worker.name,
-        model: request.worker.model,
+        model: null,
         sessionId: null,
         summary: error instanceof Error ? error.message : String(error),
         costUsd: null,
@@ -98,11 +98,11 @@ export class FixtureRunner {
   }
 }
 
-function notStarted(worker: string, model: string): WorkerOutcome {
+function notStarted(worker: string): WorkerOutcome {
   return {
     status: "failed",
     worker,
-    model,
+    model: null,
     sessionId: null,
     summary: "Worker was not started because workspace creation failed",
     costUsd: null,
