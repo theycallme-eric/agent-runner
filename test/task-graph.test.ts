@@ -11,6 +11,7 @@ function task(
 ): TaskNode {
   return {
     id,
+    sourceId: id,
     revision: `${id}-revision`,
     title: id,
     prompt: `Implement ${id}`,

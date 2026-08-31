@@ -14,7 +14,8 @@ pluggable task and dependency adapters, and enforces task uniqueness and per-pro
 SQLite. It also simulates controller-owned verification, base synchronization, CI, retries, and human
 gates. A local Claude Code adapter and disposable Git worktree harness exist, but real unattended
 execution is deliberately disabled while inherited settings and subscription-quota handling are
-unresolved. It is not yet connected to GitHub, and nothing here runs in the background.
+unresolved. GitHub issue and dependency discovery is connected read-only; claim-to-worker delivery
+is not connected yet, and nothing here runs in the background.
 
 ## Start here
 
@@ -22,6 +23,7 @@ unresolved. It is not yet connected to GitHub, and nothing here runs in the back
 |---|---|
 | [Architecture](docs/architecture.md) | System boundary, project contract, and first executable slice |
 | [Project onboarding](docs/project-onboarding.md) | Multi-project registry and task/DAG plug-in boundary |
+| [GitHub adapter](docs/github-adapter.md) | Issue selection, native dependencies, and normalization rules |
 | [Worker adapters](docs/worker-adapters.md) | Agent-neutral protocol and provider adapter boundary |
 | [Landscape](docs/landscape.md) | Recent systems reviewed and the current adopt/evaluate/build decisions |
 | [Implementation log](docs/implementation-log.md) | Chronological decisions, problems, and corrections across sessions |
@@ -50,12 +52,16 @@ npm run build
 node dist/src/cli.js validate fixtures/project
 node dist/src/cli.js register /path/to/project --worker claude-fable
 node dist/src/cli.js status
+node dist/src/cli.js ready <project-id>
 ```
 
 `register` reads the standard contract and stores the project location plus worker-profile selection
 in controller state. It does not copy the project, rewrite its requirements, or put agent/model
 selection in the product repository. Use `--state <path>` or `AGENT_RUNNER_STATE_PATH` to select a
 different controller database.
+
+The built-in GitHub adapter reads issues and GitHub's native `blocked by` relationships. `ready` is
+read-only: it refreshes and validates the DAG but does not claim work or launch an agent.
 
 ## Coding-agent support
 
@@ -98,5 +104,5 @@ will add only the adapter after the controller passes its simulator and fixture-
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License: not selected yet
-- Next decision gate: add concrete GitHub task/dependency adapters and connect one repository-owned
-  fixture task to a real worker and draft pull request
+- Next decision gate: dogfood the GitHub adapters on a repository-owned issue DAG, then connect one
+  task to a real worker and draft pull request

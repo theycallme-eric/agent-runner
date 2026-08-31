@@ -68,6 +68,7 @@ function assertAcyclic(tasks: ReadonlyMap<string, TaskNode>): void {
 function validateTask(task: TaskNode): void {
   for (const [path, value] of [
     ["id", task.id],
+    ["sourceId", task.sourceId],
     ["revision", task.revision],
     ["title", task.title],
     ["prompt", task.prompt],

@@ -100,3 +100,19 @@ transcripts or secrets here.
   capacity enforcement.
 - Next open decision: implement concrete GitHub task and dependency adapters, then connect a
   repository-owned fixture task to the existing workspace/worker/verification path.
+
+## 2026-08-31 — GitHub issue and native-dependency adapters
+
+- Confirmed against current GitHub documentation that `blocked_by` and `blocking` are first-class
+  issue relationships available through REST, GraphQL, and `gh`; dependency markers in issue bodies
+  are unnecessary.
+- Added a mockable `gh api` client with explicit API version `2026-03-10`, pagination, schema
+  validation, pull-request exclusion, and bounded output.
+- Added GitHub issue normalization and native `blocked_by` resolution. Closed `not_planned` issues,
+  explicit `agent:blocked` labels, missing dependencies, and cross-repository edges fail safely.
+- Added provider-owned `tasks.config` and GitHub `includeLabels`, keeping selection policy out of the
+  controller core. Agent Runner's own contract selects `agent:task` issues.
+- Added the read-only `ready` CLI flow and a fake-`gh` end-to-end CLI test. The deterministic suite now
+  has 38 tests and never calls GitHub during verification.
+- Next open decision: create the repository-owned task DAG, verify it through the live read-only
+  adapter, then connect claim → workspace → selected worker → verification → draft pull request.

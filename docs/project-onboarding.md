@@ -41,11 +41,14 @@ The contract names two controller-installed plug-ins:
 tasks:
   provider: github
   dependencies: github-native
+  config:
+    includeLabels: [agent:task]
 ```
 
 The task provider normalizes task id, revision, title, prompt, status, and dependency references. The
 dependency resolver may preserve those references or derive them from another source. Neither name
-is hard-coded in the contract parser.
+is hard-coded in the contract parser. `config` is an optional provider-owned object; the core stores
+it without interpreting GitHub labels or another provider's selection language.
 
 Before a task can be claimed, the planner rejects duplicate ids, missing dependencies, duplicate
 edges, self-dependencies, and cycles. A pending task is ready only when every dependency is complete.

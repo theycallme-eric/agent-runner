@@ -108,9 +108,10 @@ Only after this spike should CLEAR receive its adapter.
 
 The local simulator now covers the controller-owned portions of exit criteria 1, 3, 4, 5, and 6. A
 disposable Git harness also creates an isolated task branch at the exact selected base, and a
-model-neutral worker boundary has fake-worker coverage. The unresolved portion is deliberately
-external: task discovery from a forge, a successful isolated real-worker session, and draft
-pull-request publication. Those belong in fixture-repository experiments, not in CLEAR.
+model-neutral worker boundary has fake-worker coverage. GitHub issue and native-dependency discovery
+now works through the same plug-in boundary. The unresolved portion is a successful isolated
+real-worker session and draft pull-request publication. Those belong in repository-owned dogfood
+experiments, not in CLEAR.
 
 Real workers remain fail-closed. The first Claude/Fable smoke test revealed that inherited MCP state
 can break a headless run and that `--max-budget-usd` is a stop condition rather than an enforceable
@@ -122,3 +123,7 @@ The local Claude adapter therefore opts into setting sources explicitly, uses st
 configuration by default, disables browser integration, slash commands, and auto-memory, and
 requires both a turn limit and a wall-clock timeout. A production project may opt into its checked-in
 `project` source so `CLAUDE.md` is visible; user and local settings are never inherited implicitly.
+
+The first concrete task/dependency pair is GitHub Issues plus native issue dependencies. It is a
+plug-in registration, not special behavior in the planner. Agent Runner's own checked-in contract is
+the repository-owned dogfood fixture and selects only issues labeled `agent:task`.

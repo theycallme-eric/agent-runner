@@ -11,6 +11,7 @@ export interface ProjectContract {
   tasks: {
     provider: string;
     dependencies: string;
+    config: Record<string, unknown>;
   };
   workspace: {
     setup: string[];
@@ -51,7 +52,7 @@ export function parseProjectContract(source: string): ProjectContract {
   exactKeys(project, ["id", "baseBranch"], "project");
 
   const tasks = objectAt(root.tasks, "tasks");
-  exactKeys(tasks, ["provider", "dependencies"], "tasks");
+  allowedKeys(tasks, ["provider", "dependencies", "config"], ["provider", "dependencies"], "tasks");
 
   const workspace = objectAt(root.workspace, "workspace");
   exactKeys(workspace, ["setup"], "workspace");
@@ -86,6 +87,7 @@ export function parseProjectContract(source: string): ProjectContract {
     tasks: {
       provider: pluginIdAt(tasks.provider, "tasks.provider"),
       dependencies: pluginIdAt(tasks.dependencies, "tasks.dependencies"),
+      config: tasks.config === undefined ? {} : objectAt(tasks.config, "tasks.config"),
     },
     workspace: {
       setup: stringArrayAt(workspace.setup, "workspace.setup"),
@@ -168,8 +170,17 @@ function pluginIdAt(value: unknown, path: string): string {
 }
 
 function exactKeys(value: Record<string, unknown>, expected: readonly string[], path: string): void {
-  const unknown = Object.keys(value).filter((key) => !expected.includes(key));
-  const missing = expected.filter((key) => !(key in value));
+  allowedKeys(value, expected, expected, path);
+}
+
+function allowedKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  required: readonly string[],
+  path: string,
+): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  const missing = required.filter((key) => !(key in value));
   if (unknown.length > 0) {
     throw new Error(`${path} has unknown fields: ${unknown.join(", ")}`);
   }

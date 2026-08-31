@@ -1,0 +1,28 @@
+version: 1
+project:
+  id: theycallme-eric/agent-runner
+  baseBranch: main
+tasks:
+  provider: github
+  dependencies: github-native
+  config:
+    includeLabels:
+      - agent:task
+workspace:
+  setup:
+    - npm ci
+verification:
+  required:
+    - npm run check
+    - npm test
+    - npm run build
+  protectedPaths:
+    - pattern: .github/workflows/**
+      gate: human
+execution:
+  concurrency: 1
+  attempts: 2
+  timeoutMinutes: 120
+delivery:
+  pullRequest: true
+  merge: never

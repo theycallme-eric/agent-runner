@@ -19,6 +19,9 @@ async function main(): Promise<void> {
     case "status":
       await projectsCommand(argumentsList);
       return;
+    case "ready":
+      await readyCommand(argumentsList);
+      return;
     default:
       usage();
   }
@@ -92,6 +95,64 @@ async function projectsCommand(argumentsList: string[]): Promise<void> {
   }
 }
 
+async function readyCommand(argumentsList: string[]): Promise<void> {
+  const projectId = argumentsList[0];
+  if (!projectId) {
+    usage();
+    return;
+  }
+  const statePath = statePathFrom(argumentsList);
+  const [
+    { ProjectRegistryStore },
+    { TaskProviderRegistry },
+    { DependencyResolverRegistry },
+    { registerGitHubAdapters },
+    { analyzeTaskGraph },
+  ] = await Promise.all([
+    import("./projects/registry.js"),
+    import("./tasks/provider-registry.js"),
+    import("./tasks/dependency-registry.js"),
+    import("./github/register.js"),
+    import("./tasks/graph.js"),
+  ]);
+  const registry = new ProjectRegistryStore(statePath);
+  try {
+    const project = registry.get(projectId);
+    if (!project) {
+      throw new Error(`Unknown project: ${projectId}`);
+    }
+    if (!project.enabled) {
+      throw new Error(`Project ${projectId} is disabled`);
+    }
+    const contract = await loadProjectContract(project.contractPath);
+    const providers = new TaskProviderRegistry();
+    const dependencies = new DependencyResolverRegistry();
+    registerGitHubAdapters(
+      providers,
+      dependencies,
+      process.env.AGENT_RUNNER_GH_BIN ?? "gh",
+    );
+    const provider = providers.get(contract.tasks.provider);
+    const dependencyResolver = dependencies.get(contract.tasks.dependencies);
+    const discovered = await provider.listTasks(project, contract);
+    const graph = analyzeTaskGraph(
+      await dependencyResolver.resolve(discovered, project, contract),
+    );
+    print({
+      project: project.id,
+      provider: provider.name,
+      dependencies: dependencyResolver.name,
+      ready: graph.ready.map((task) => ({ id: task.id, title: task.title })),
+      waiting: graph.waiting.map((task) => task.id),
+      blocked: graph.blocked.map((task) => task.id),
+      completed: graph.completed.map((task) => task.id),
+      edges: graph.edgeCount,
+    });
+  } finally {
+    registry.close();
+  }
+}
+
 async function resolveContractPath(input: string): Promise<string> {
   const path = resolve(input);
   try {
@@ -127,7 +188,8 @@ function usage(): void {
   agent-runner validate <project-or-contract>
   agent-runner register <project-root> --worker <profile> [--state <database>]
   agent-runner projects [--state <database>]
-  agent-runner status [--state <database>]`);
+  agent-runner status [--state <database>]
+  agent-runner ready <project-id> [--state <database>]`);
   process.exitCode = 2;
 }
 

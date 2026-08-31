@@ -41,6 +41,18 @@ test("accepts task providers and dependency adapters without changing the contra
 
   assert.equal(contract.tasks.provider, "local-json");
   assert.equal(contract.tasks.dependencies, "embedded-dag");
+  assert.deepEqual(contract.tasks.config, {});
+});
+
+test("preserves provider-specific task configuration without coupling the core schema", () => {
+  const configured = fixture.replace(
+    "  dependencies: github-native",
+    "  dependencies: github-native\n  config:\n    includeLabels: [agent:task]",
+  );
+
+  const contract = parseProjectContract(configured);
+
+  assert.deepEqual(contract.tasks.config, { includeLabels: ["agent:task"] });
 });
 
 test("rejects unsafe task provider identifiers", () => {

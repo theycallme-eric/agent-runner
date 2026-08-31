@@ -39,6 +39,7 @@ function registration(id: string, workerProfile: string): ProjectRegistration {
 function task(id: string, dependencies: string[] = []): TaskNode {
   return {
     id,
+    sourceId: id,
     revision: `${id}-revision`,
     title: id,
     prompt: `Implement ${id}`,

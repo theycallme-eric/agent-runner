@@ -5,6 +5,7 @@ export type TaskStatus = "pending" | "completed" | "blocked";
 
 export interface TaskNode {
   id: string;
+  sourceId: string;
   revision: string;
   title: string;
   prompt: string;
