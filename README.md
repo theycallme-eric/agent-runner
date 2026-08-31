@@ -12,10 +12,10 @@ The first local reliability slice is executable. It validates a project's `.agen
 registers multiple projects and controller-owned worker profiles durably, resolves ready work through
 pluggable task and dependency adapters, and enforces task uniqueness and per-project concurrency in
 SQLite. It also simulates controller-owned verification, base synchronization, CI, retries, and human
-gates. A local Claude Code adapter and disposable Git worktree harness exist, but real unattended
-execution is deliberately disabled while inherited settings and subscription-quota handling are
-unresolved. GitHub issue and dependency discovery is connected read-only; claim-to-worker delivery
-is not connected yet, and nothing here runs in the background.
+gates. The concrete execution service now connects a claim to an exact-base worktree, a selected
+worker adapter, independent commands, a locally committed verified head, and durable evidence. Real
+unattended CLI execution remains disabled until profile loading, reconciliation, and delivery are
+connected. GitHub issue and dependency discovery is read-only, and nothing runs in the background.
 
 ## Start here
 
@@ -43,7 +43,9 @@ The suite currently proves that duplicate claims are rejected, stale work is rec
 second run, exhausted workers fail visibly, controller restarts preserve state, invalid transitions
 fail closed, false worker success is rejected, advanced bases force re-verification, protected paths
 wait for a human, failing CI cannot complete a run, workers are replaceable, and a task branch starts
-in an isolated worktree at the selected base commit.
+in an isolated worktree at the selected base commit. The full claim-to-verified-workspace fixture
+also rejects worker crashes, success without changes, failed independent verification, and a base
+that advances before the verified head is recorded.
 
 ## Current CLI
 
@@ -104,5 +106,5 @@ will add only the adapter after the controller passes its simulator and fixture-
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License: not selected yet
-- Next decision gate: dogfood the GitHub adapters on a repository-owned issue DAG, then connect one
-  task to a real worker and draft pull request
+- Next decision gate: publish a verified workspace as one idempotent draft pull request, then expose
+  the joined plan/execution/delivery flow through an explicit controller command

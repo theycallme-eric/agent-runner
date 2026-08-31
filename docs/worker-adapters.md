@@ -18,6 +18,10 @@ Model names, authentication, tools, turn limits, and provider-specific settings 
 or controller installation. They are not project requirements and do not appear in
 `.agent-runner.yml`.
 
+The controller registry maps a project to a named worker profile. `WorkerProfileRegistry` resolves
+that profile to a configured adapter at execution time, so the claim and lifecycle code never needs
+to know which agent or model is behind it.
+
 ## Native adapters
 
 `ClaudeCodeWorker` invokes Claude Code with explicit model, tool, permission, setting-source, MCP,
@@ -61,5 +65,7 @@ the controller treats all of them identically after normalization.
 ## Trust boundary
 
 A worker success report is never sufficient to complete a run. Agent Runner independently checks the
-workspace, synchronizes against the current base, runs project verification, evaluates protected
-paths, and observes CI before changing delivery state.
+workspace, runs project verification, rejects an advanced base, evaluates protected paths, and
+records a committed verified head. The simulator proves full re-verification after synchronization;
+the concrete executor currently stops safely on an advanced base until reconciliation is connected.
+CI and pull-request state belong to the next delivery slice.

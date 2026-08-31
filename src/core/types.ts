@@ -5,6 +5,7 @@ export const RUN_STATES = [
   "running",
   "verifying",
   "synchronized",
+  "verified",
   "pr-open",
   "ci",
   "waiting-human",
@@ -32,6 +33,21 @@ export interface RunRecord extends TaskRef {
   requiresReverification: boolean;
   failureReason: string | null;
   createdAt: number;
+  updatedAt: number;
+}
+
+export interface RunExecutionRecord {
+  runId: string;
+  workspacePath: string | null;
+  branchName: string | null;
+  workerProfile: string | null;
+  workerName: string | null;
+  workerStatus: "succeeded" | "failed" | "timed-out" | null;
+  workerModel: string | null;
+  workerSessionId: string | null;
+  workerSummary: string | null;
+  workerCostUsd: number | null;
+  workerDurationMs: number | null;
   updatedAt: number;
 }
 

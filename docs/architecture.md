@@ -70,7 +70,7 @@ concurrency limit. See [Project onboarding](project-onboarding.md).
 
 ```text
 discovered → claimed → workspace-ready → running → verifying
-           → synchronized → PR-open → CI → waiting-human/completed/failed
+           → synchronized → verified → PR-open → CI → waiting-human/completed/failed
 ```
 
 Every transition is idempotent and recorded with the task revision, base SHA, head SHA, workspace,
@@ -106,12 +106,15 @@ Only after this spike should CLEAR receive its adapter.
 
 ## Executable evidence so far
 
-The local simulator now covers the controller-owned portions of exit criteria 1, 3, 4, 5, and 6. A
-disposable Git harness also creates an isolated task branch at the exact selected base, and a
-model-neutral worker boundary has fake-worker coverage. GitHub issue and native-dependency discovery
-now works through the same plug-in boundary. The unresolved portion is a successful isolated
-real-worker session and draft pull-request publication. Those belong in repository-owned dogfood
-experiments, not in CLEAR.
+The local simulator now covers the controller-owned portions of exit criteria 1, 3, 4, 5, and 6.
+The concrete execution service joins an atomic claim, exact-base worktree, controller-selected
+`WorkerAdapter`, independent setup and verification commands, protected-path gate, local commit, and
+durable workspace/session/head evidence. It rejects worker crashes, timeouts, false success without
+changes, verification failure, and a base that advances before the verified head is recorded. GitHub
+issue and native-dependency discovery works through the same plug-in boundary. The unresolved
+portion is a successful isolated real-worker session, base-advance reconciliation rather than safe
+failure, and draft pull-request publication. Those belong in repository-owned dogfood experiments,
+not in CLEAR.
 
 Real workers remain fail-closed. The first Claude/Fable smoke test revealed that inherited MCP state
 can break a headless run and that `--max-budget-usd` is a stop condition rather than an enforceable

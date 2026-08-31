@@ -64,11 +64,11 @@ export class SimulatorController {
           failureReason: "post-sync-verification-failed",
         });
       }
-      run = this.#store.transition(options.runId, "pr-open", options.now + 3, {
+      run = this.#store.transition(options.runId, "verified", options.now + 3, {
         requiresReverification: false,
       });
     } else {
-      run = this.#store.transition(options.runId, "pr-open", options.now + 1);
+      run = this.#store.transition(options.runId, "verified", options.now + 1);
     }
 
     const gate = protectedPathGate(
@@ -79,14 +79,15 @@ export class SimulatorController {
       return this.#store.transition(options.runId, "waiting-human", options.now + 4);
     }
 
-    run = this.#store.transition(options.runId, "ci", options.now + 4);
+    run = this.#store.transition(options.runId, "pr-open", options.now + 4);
+    run = this.#store.transition(options.runId, "ci", options.now + 5);
     const ci = this.#services.checkCi(run);
     if (!ci.passed) {
-      return this.#store.transition(options.runId, "failed", options.now + 5, {
+      return this.#store.transition(options.runId, "failed", options.now + 6, {
         failureReason: "ci-failed",
       });
     }
-    return this.#store.transition(options.runId, "completed", options.now + 5);
+    return this.#store.transition(options.runId, "completed", options.now + 6);
   }
 }
 

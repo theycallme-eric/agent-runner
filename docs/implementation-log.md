@@ -124,3 +124,23 @@ transcripts or secrets here.
   normalization; it does not yet prove execution.
 - Next open decision: connect claim → isolated workspace → selected worker → independent verification
   for RUN-01. Draft pull-request publication remains the dependent DELIVERY-01 task.
+
+## 2026-08-31 — Claim-to-verified-workspace execution
+
+- Added a controller-owned worker-profile registry and concrete execution service. A claimed task now
+  becomes an exact-base isolated worktree, runs trusted setup commands, invokes only `WorkerAdapter`,
+  runs required verification outside the worker, and records a locally committed verified head.
+- Added durable workspace, branch, worker profile/name/status/model/session/summary/duration/cost, and
+  command evidence without putting agent/model configuration in the project contract.
+- Added `verified` as the explicit handoff between implementation/verification and pull-request
+  delivery. Protected-path changes stop at `waiting-human`; automatic merge remains impossible.
+- Initial execution wiring heartbeated the lease during the worker but not during potentially long
+  setup or verification commands. Corrected all long-running phases to use the same lease guard.
+- The concrete executor fails closed if the registered profile is missing, workspace creation or setup
+  fails, a worker crashes/times out/reports success without changes, verification fails, the base
+  advances, or the final workspace is dirty or empty.
+- Evidence: the deterministic suite has 44 tests, including full planner → claim → real Git worktree
+  → fake worker → shell verification → committed head coverage, persisted session evidence, worker
+  crash/no-change rejection, verification failure, protected-path gating, and base-advance rejection.
+- Next open decision: implement DELIVERY-01 as idempotent draft-pull-request publication, then expose
+  the joined path through controller profile configuration and an explicit run command.

@@ -7,6 +7,7 @@ import {
   type ClaimRequest,
   type ClaimResult,
   type ReclaimResult,
+  type RunExecutionRecord,
   type RunRecord,
   type RunState,
 } from "./types.js";
@@ -16,8 +17,9 @@ const ALLOWED_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
   claimed: ["workspace-ready", "failed"],
   "workspace-ready": ["running", "failed"],
   running: ["verifying", "failed"],
-  verifying: ["synchronized", "pr-open", "waiting-human", "failed"],
+  verifying: ["synchronized", "verified", "waiting-human", "failed"],
   synchronized: ["verifying", "failed"],
+  verified: ["pr-open", "waiting-human", "failed"],
   "pr-open": ["ci", "waiting-human", "failed"],
   ci: ["completed", "waiting-human", "failed"],
   "waiting-human": ["pr-open", "ci", "completed", "failed"],
@@ -41,6 +43,37 @@ interface RunRow {
   failure_reason: string | null;
   created_at: number;
   updated_at: number;
+}
+
+interface RunExecutionRow {
+  run_id: string;
+  workspace_path: string | null;
+  branch_name: string | null;
+  worker_profile: string | null;
+  worker_name: string | null;
+  worker_status: string | null;
+  worker_model: string | null;
+  worker_session_id: string | null;
+  worker_summary: string | null;
+  worker_cost_usd: number | null;
+  worker_duration_ms: number | null;
+  updated_at: number;
+}
+
+export interface WorkspaceEvidence {
+  workspacePath: string;
+  branchName: string;
+  workerProfile: string;
+}
+
+export interface WorkerEvidence {
+  workerName: string;
+  status: "succeeded" | "failed" | "timed-out";
+  model: string | null;
+  sessionId: string | null;
+  summary: string;
+  costUsd: number | null;
+  durationMs: number;
 }
 
 export interface TransitionPatch {
@@ -302,6 +335,76 @@ export class RunStore {
     }));
   }
 
+  recordWorkspace(runId: string, evidence: WorkspaceEvidence, now: number): void {
+    this.#require(runId);
+    this.#database
+      .prepare(`
+        INSERT INTO run_execution (
+          run_id, workspace_path, branch_name, worker_profile, updated_at
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(run_id) DO UPDATE SET
+          workspace_path = excluded.workspace_path,
+          branch_name = excluded.branch_name,
+          worker_profile = excluded.worker_profile,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        runId,
+        evidence.workspacePath,
+        evidence.branchName,
+        evidence.workerProfile,
+        now,
+      );
+    this.#event(runId, now, "workspace-recorded", evidence);
+  }
+
+  recordWorker(runId: string, evidence: WorkerEvidence, now: number): void {
+    this.#require(runId);
+    this.#database
+      .prepare(`
+        INSERT INTO run_execution (
+          run_id, worker_name, worker_status, worker_model, worker_session_id,
+          worker_summary, worker_cost_usd, worker_duration_ms, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id) DO UPDATE SET
+          worker_name = excluded.worker_name,
+          worker_status = excluded.worker_status,
+          worker_model = excluded.worker_model,
+          worker_session_id = excluded.worker_session_id,
+          worker_summary = excluded.worker_summary,
+          worker_cost_usd = excluded.worker_cost_usd,
+          worker_duration_ms = excluded.worker_duration_ms,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        runId,
+        evidence.workerName,
+        evidence.status,
+        evidence.model,
+        evidence.sessionId,
+        evidence.summary,
+        evidence.costUsd,
+        evidence.durationMs,
+        now,
+      );
+    this.#event(runId, now, "worker-recorded", evidence);
+  }
+
+  recordEvidence(runId: string, type: string, detail: unknown, now: number): void {
+    this.#require(runId);
+    if (!/^[a-z][a-z0-9-]*$/.test(type)) {
+      throw new Error(`Invalid evidence type: ${type}`);
+    }
+    this.#event(runId, now, type, detail);
+  }
+
+  execution(runId: string): RunExecutionRecord | null {
+    const row = this.#database
+      .prepare("SELECT * FROM run_execution WHERE run_id = ?")
+      .get(runId) as RunExecutionRow | undefined;
+    return row ? mapExecution(row) : null;
+  }
+
   #migrate(): void {
     this.#database.exec(`
       CREATE TABLE IF NOT EXISTS runs (
@@ -329,6 +432,21 @@ export class RunStore {
         occurred_at INTEGER NOT NULL,
         event_type TEXT NOT NULL,
         detail_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS run_execution (
+        run_id TEXT PRIMARY KEY REFERENCES runs(id),
+        workspace_path TEXT,
+        branch_name TEXT,
+        worker_profile TEXT,
+        worker_name TEXT,
+        worker_status TEXT,
+        worker_model TEXT,
+        worker_session_id TEXT,
+        worker_summary TEXT,
+        worker_cost_usd REAL,
+        worker_duration_ms INTEGER,
+        updated_at INTEGER NOT NULL
       );
     `);
   }
@@ -385,6 +503,27 @@ function mapRun(row: RunRow): RunRecord {
     requiresReverification: row.requires_reverification === 1,
     failureReason: row.failure_reason,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapExecution(row: RunExecutionRow): RunExecutionRecord {
+  const status = row.worker_status;
+  if (status !== null && !["succeeded", "failed", "timed-out"].includes(status)) {
+    throw new Error(`Invalid persisted worker status: ${status}`);
+  }
+  return {
+    runId: row.run_id,
+    workspacePath: row.workspace_path,
+    branchName: row.branch_name,
+    workerProfile: row.worker_profile,
+    workerName: row.worker_name,
+    workerStatus: status as RunExecutionRecord["workerStatus"],
+    workerModel: row.worker_model,
+    workerSessionId: row.worker_session_id,
+    workerSummary: row.worker_summary,
+    workerCostUsd: row.worker_cost_usd,
+    workerDurationMs: row.worker_duration_ms,
     updatedAt: row.updated_at,
   };
 }
