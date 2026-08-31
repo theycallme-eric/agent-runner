@@ -40,6 +40,10 @@ and polls CI without relaunching the worker. Completed and failed runs remain vi
 General stale-lease/workspace recovery and base synchronization are RECON-01, not hidden behavior in
 this first command.
 
+GitHub repositories with no required checks report CI as `none`. That is a valid observation, not a
+passed check suite: the run remains at `ci` with `waiting-ci`, the pull request remains a draft, and
+human review is still required.
+
 The JSON result reports the inspected graph, new claims, reconciled deliveries, duplicate task ids,
 capacity/limit stops, non-secret worker identity, workspace, pull-request URL, CI state, and failure
 reason. Any task or delivery failure sets `ok: false` and a non-zero process exit status while still

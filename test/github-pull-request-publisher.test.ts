@@ -9,6 +9,7 @@ import {
   GitHubPullRequestPublisher,
   parseChecks,
   parsePullRequests,
+  recoverChecksOutput,
 } from "../src/github/pull-request-publisher.js";
 
 test("normalizes draft pull requests and required check buckets", () => {
@@ -40,6 +41,25 @@ test("normalizes draft pull requests and required check buckets", () => {
       { name: "lint", bucket: "fail", link: "https://example.invalid/check" },
     ])).status,
     "failed",
+  );
+});
+
+test("distinguishes GitHub's no-checks response from other command failures", () => {
+  assert.equal(
+    recoverChecksOutput({
+      code: 1,
+      stdout: "",
+      stderr: "no checks reported on the 'agent-runner/task-42' branch\n",
+    }),
+    "[]",
+  );
+  assert.equal(
+    recoverChecksOutput({ code: 1, stdout: "", stderr: "authentication failed\n" }),
+    null,
+  );
+  assert.equal(
+    recoverChecksOutput({ code: 8, stdout: '[{"name":"test","bucket":"pending"}]', stderr: "" }),
+    '[{"name":"test","bucket":"pending"}]',
   );
 });
 

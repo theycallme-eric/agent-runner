@@ -167,13 +167,9 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     try {
       return await this.#gh(argumentsList);
     } catch (error) {
-      const failure = error as { code?: unknown; stdout?: unknown };
-      if (
-        (failure.code === 1 || failure.code === 8) &&
-        typeof failure.stdout === "string" &&
-        failure.stdout.trim() !== ""
-      ) {
-        return failure.stdout;
+      const recovered = recoverChecksOutput(error);
+      if (recovered !== null) {
+        return recovered;
       }
       throw error;
     }
@@ -187,6 +183,29 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     });
     return result.stdout.trim();
   }
+}
+
+export function recoverChecksOutput(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || Array.isArray(error)) {
+    return null;
+  }
+  const failure = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
+  if (
+    (failure.code === 1 || failure.code === 8) &&
+    typeof failure.stdout === "string" &&
+    failure.stdout.trim() !== ""
+  ) {
+    return failure.stdout;
+  }
+  if (
+    failure.code === 1 &&
+    (failure.stdout === undefined || failure.stdout === "") &&
+    typeof failure.stderr === "string" &&
+    /^no checks reported on the '.+' branch$/u.test(failure.stderr.trim())
+  ) {
+    return "[]";
+  }
+  return null;
 }
 
 export function parsePullRequests(source: string): PullRequestSnapshot[] {

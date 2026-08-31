@@ -235,3 +235,29 @@ transcripts or secrets here.
   `bypassPermissions` is rejected by schema. The local dogfood profile now selects `acceptEdits`.
 - Next open decision: verify the permission-profile correction, create a new issue revision so the
   failed immutable run is preserved, and retry DOGFOOD-01 through the same public command.
+
+## 2026-08-31 — First live draft pull request and no-check reconciliation
+
+- Advanced issue #7 deliberately so the failed, immutable first attempt remained auditable, then
+  repeated the targeted dry-run against remote base `8ac806c`. It selected only DOGFOOD-01 without a
+  claim or model call.
+- The second mutating run succeeded through the public `run-once` path. Persisted evidence: run
+  `f6e409ca-67a8-4ed3-b63a-d35295f74219`, Claude Code `2.1.251` in local headless print mode,
+  model `fable`, permission mode `acceptEdits`, Max-subscription authentication, `$5` client-side
+  budget ceiling, worker session `653d41d9-72da-4008-b0e6-acb45a0bb8e1`, local usage estimate
+  `$0.768455`, and duration 63.938 seconds.
+- The controller accepted only `README.md` and `docs/dogfood-runbook.md`, then independently passed
+  `npm run check`, `npm test`, and `npm run build`. It committed verified head `4d64ab7`, pushed one
+  runner-owned branch, and created [draft pull request #8](https://github.com/theycallme-eric/agent-runner/pull/8).
+- The initial CI observation exposed a forge-adapter edge case: `gh pr checks --required` exits 1
+  with `no checks reported` when a repository has no required checks. Publication had succeeded, but
+  the controller correctly retained the run at `pr-open` with a retryable delivery failure rather
+  than losing the pull-request identity or relaunching Fable.
+- Corrected only that exact GitHub response to an empty check set. Authentication errors and other
+  code-1 failures still fail closed. The suite now has 60 deterministic tests, including both the
+  no-check response and an unrelated command failure.
+- Replayed the same task revision. The controller made no worker call, reconciled the same branch and
+  pull request, recorded CI as `none`, and advanced the existing run to `ci` with `waiting-ci`.
+  `none` is intentionally not treated as passed; the pull request remains draft and unmerged.
+- Next open decision: human review of draft PR #8 and implementation of RECON-01 before any unattended
+  scheduler is enabled.
