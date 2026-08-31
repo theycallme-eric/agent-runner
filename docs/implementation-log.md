@@ -114,5 +114,13 @@ transcripts or secrets here.
   controller core. Agent Runner's own contract selects `agent:task` issues.
 - Added the read-only `ready` CLI flow and a fake-`gh` end-to-end CLI test. The deterministic suite now
   has 38 tests and never calls GitHub during verification.
-- Next open decision: create the repository-owned task DAG, verify it through the live read-only
-  adapter, then connect claim → workspace → selected worker → verification → draft pull request.
+- Created `agent:task` and `agent:blocked` repository labels plus the first real two-task graph:
+  [RUN-01](https://github.com/theycallme-eric/agent-runner/issues/1) and
+  [DELIVERY-01](https://github.com/theycallme-eric/agent-runner/issues/2), with DELIVERY-01 natively
+  blocked by RUN-01.
+- Registered Agent Runner itself in an ignored local controller database with the `claude-fable`
+  worker profile. A live read-only refresh returned RUN-01 ready, DELIVERY-01 waiting, no blocked or
+  completed tasks, and exactly one edge. This proves the public GitHub graph agrees with controller
+  normalization; it does not yet prove execution.
+- Next open decision: connect claim → isolated workspace → selected worker → independent verification
+  for RUN-01. Draft pull-request publication remains the dependent DELIVERY-01 task.

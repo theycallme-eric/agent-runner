@@ -48,6 +48,15 @@ agent-runner ready owner/repository
 This refreshes issues and dependencies, validates the graph, and prints ready, waiting, blocked, and
 completed task ids. It does not claim or execute work.
 
+## Live dogfood evidence
+
+Agent Runner's checked-in contract selects its own `agent:task` issues. The first repository-owned
+graph contains [RUN-01](https://github.com/theycallme-eric/agent-runner/issues/1) and dependent
+[DELIVERY-01](https://github.com/theycallme-eric/agent-runner/issues/2). A live `ready` refresh on
+2026-08-31 returned RUN-01 as ready, DELIVERY-01 as waiting, and exactly one dependency edge. The
+controller registration database used for this check is local and ignored; the portable contract
+and visible task graph are committed or stored on GitHub.
+
 ## Sources
 
 - [GitHub issue dependency API](https://docs.github.com/en/rest/issues/issue-dependencies?apiVersion=2026-03-10)
