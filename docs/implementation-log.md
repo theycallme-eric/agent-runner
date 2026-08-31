@@ -296,3 +296,7 @@ transcripts or secrets here.
 - Applied the already-approved dogfood link to main as the human conflict resolution before the live
   pass. The synchronized PR can therefore retain the substantive runbook file while the controller
   remains forbidden from guessing through merge conflicts.
+- A second preview showed the older PR also lacked main's adjacent reconciliation link. Chose a
+  two-stage resolution: temporarily leave that page unlinked, synchronize the dogfood branch, then
+  restore the link and exercise a second clean base synchronization. This avoids rewriting persisted
+  PR identity or weakening conflict detection.
