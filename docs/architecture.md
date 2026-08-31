@@ -105,8 +105,9 @@ pull-request publication. Those belong in fixture-repository experiments, not in
 
 Real workers remain fail-closed. The first Claude/Fable smoke test revealed that inherited MCP state
 can break a headless run and that `--max-budget-usd` is a stop condition rather than an enforceable
-preflight cap. The controller must isolate worker settings and enforce its own aggregate admission
-budget before unattended runs are enabled.
+preflight cap. Under Max/Pro subscription authentication its dollar output is a local token-cost
+estimate, not billing. The controller must isolate worker settings and manage parallelism and plan
+quota before unattended runs are enabled.
 
 The local Claude adapter therefore opts into setting sources explicitly, uses strict empty MCP
 configuration by default, disables browser integration, slash commands, and auto-memory, and

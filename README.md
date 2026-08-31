@@ -12,7 +12,7 @@ The first local reliability slice is executable. It validates a project's `.agen
 stores claims and lifecycle events durably in SQLite, and simulates controller-owned verification,
 base synchronization, CI, retries, and human gates. A local Claude Code adapter and disposable Git
 worktree harness exist, but real unattended execution is deliberately disabled while inherited
-settings and enforceable spend limits are unresolved. It is not yet connected to GitHub, and
+settings and subscription-quota handling are unresolved. It is not yet connected to GitHub, and
 nothing here is currently running in the background.
 
 ## Start here
@@ -42,8 +42,9 @@ in an isolated worktree at the selected base commit.
 
 `npm run smoke:fable` is a manual diagnostic, not part of verification or unattended execution. Set
 `AGENT_RUNNER_CLAUDE_BIN` when the intended Claude Code binary is not first on `PATH`. Do not treat
-Claude Code's `--max-budget-usd` as a hard preflight spending cap; the first real spike exceeded the
-configured value before stopping.
+Claude Code's `--max-budget-usd` as a hard preflight limit; the first real spike's local cost estimate
+exceeded the configured value before stopping. For Max/Pro subscription authentication, Anthropic
+states that this dollar estimate is not a bill. It remains useful as a usage guard.
 
 ## Intended experience
 

@@ -51,13 +51,18 @@ transcripts or secrets here.
 - The same local-headless probe against `2.1.251` reached Fable but failed while loading inherited
   pre-upgrade MCP OAuth state. It reported estimated cost `$0.664715` despite the `$0.10` stop value.
   No files were edited. Real model calls were stopped immediately.
-- Safety decision: keep unattended real workers disabled until settings/MCP isolation is proven and
-  the controller has an aggregate admission budget that does not rely on the worker's stop flag.
+- Initial interpretation treated that estimate as possible spend. Anthropic's current cost guidance
+  says Max/Pro usage is included in the subscription and the session dollar figure is not relevant to
+  billing. The local environment has no `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or
+  `CLAUDE_CODE_OAUTH_TOKEN` override, so Claude Code falls back to the existing subscription OAuth
+  login. This corrects the spend interpretation; the estimate still shows that the stop flag can
+  overshoot within a request.
+- Safety decision: keep unattended real workers disabled only until settings/MCP isolation and plan
+  quota/concurrency handling are proven. Max subscription authentication is a supported worker path.
 - Official Claude documentation confirms that filesystem setting sources must be explicitly selected
   and that `max_budget_usd` stops on a client-side estimate. Updated the adapter to use an explicit
   setting-source list, strict empty MCP configuration, no browser or slash commands, disabled
   auto-memory, a turn limit, and a wall-clock timeout. The isolation arguments are covered by a fake
   executable test; no second paid probe was made.
-- Next open decision: inspect cost semantics with a non-paid or separately approved probe, add an
-  aggregate controller admission budget, then publish a disposable draft PR through a fixture GitHub
-  repository.
+- Next open decision: finish the isolated Max-authenticated worker probe, add plan-quota-aware
+  concurrency handling, then publish a disposable draft PR through a fixture GitHub repository.
