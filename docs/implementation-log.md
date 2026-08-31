@@ -305,3 +305,32 @@ transcripts or secrets here.
   retained; no worker ran. `npm run check`, `npm test`, and `npm run build` passed after the merge.
   The controller updated draft PR #8 by persisted id, reduced its task diff to
   `docs/dogfood-runbook.md`, observed CI `none`, released its lease, and created no claim or PR.
+- Stage two restored the reconciliation link on main and advanced the same durable run to base
+  `b290982` and verified head `595e430`. The controller again reran all three required commands,
+  updated PR #8 in place, retained its draft state, and made no worker call or claim.
+- A third pass at the same base performed observation and CI polling only: base classified `current`,
+  execution `not-run`, the persisted workspace/session/branch/PR all matched, and CI remained `none`.
+  GitHub reported PR #8 open, draft, cleanly mergeable, and containing only
+  `docs/dogfood-runbook.md`. No automatic merge or completion was attempted.
+- RECON-01 exit: deterministic verification plus live repeated convergence now satisfy the restart,
+  identity, base, reverification, conflict, and CI-polling gate. AUTO-01 is the next controller layer.
+
+## 2026-08-31 — Bounded multi-project autopilot
+
+- Added an agent- and project-neutral scheduler over the existing `run-once` controller. Every pass
+  visits enabled registered projects in stable order, reconciles before claiming, and requests at
+  most one new claim at a time. It does not duplicate lifecycle or delivery logic.
+- Added explicit invocation bounds for deadline, total new claims, consecutive no-progress passes,
+  poll backoff, and lease duration. Human gates, worker unavailability, quota/rate-limit evidence,
+  and run failures stop the loop. The first version rejects global concurrency above one.
+- Added the public `autopilot` command with mandatory `--enable`; no background daemon, scheduled
+  launch, or real overnight execution was enabled implicitly.
+- Added a structured morning report covering durable run/task/project state, attempts, worker/model/
+  session, duration and cost estimate, draft/CI, failures, summary counts, and remaining ready,
+  waiting, and blocked DAG work.
+- Evidence: 74 deterministic tests pass. The scheduler simulator uses two projects with two worker
+  profiles, proves sequential claim bounds and duplicate-free repeated passes, exercises no-progress,
+  deadline, maximum-claim, explicit-enable, concurrency, and human-gate stops, and verifies report
+  contents from durable execution/delivery records.
+- Next open decision: review launch settings and run a short supervised `--max-new-claims 1` dogfood
+  session before any overnight use; then add repeatable service/container packaging.

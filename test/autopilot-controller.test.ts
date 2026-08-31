@@ -1,0 +1,294 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { AutopilotController } from "../src/autopilot/controller.js";
+import { RunStore } from "../src/core/store.js";
+import { ProjectRegistryStore } from "../src/projects/registry.js";
+import type { RunOnceRequest, RunOnceResult } from "../src/runtime/run-once.js";
+
+test("runs two projects and worker profiles sequentially, then stops after bounded no progress", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  seedMorningReport(runs);
+  const seen = new Set<string>();
+  const calls: RunOnceRequest[] = [];
+  let now = 1_000;
+  const runner = {
+    async run(request: RunOnceRequest): Promise<RunOnceResult> {
+      calls.push(request);
+      const first = !seen.has(request.projectId);
+      seen.add(request.projectId);
+      return resultFixture(
+        request.projectId,
+        request.projectId.endsWith("one") ? "worker-a" : "worker-b",
+        first,
+      );
+    },
+  };
+  const controller = new AutopilotController(projects, runs, runner, {
+    now: () => now,
+    sleep: async (milliseconds) => {
+      now += milliseconds;
+    },
+  });
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "overnight",
+      leaseDurationMs: 1_000,
+      deadlineAt: 20_000,
+      maxNewClaims: 10,
+      maxNoProgressPasses: 2,
+      pollIntervalMs: 100,
+      globalConcurrency: 1,
+    });
+
+    assert.equal(result.stopReason, "no-progress");
+    assert.equal(result.totalNewClaims, 2);
+    assert.equal(result.passes.length, 3);
+    assert.deepEqual(calls.map((call) => call.projectId), [
+      "fixture/one",
+      "fixture/two",
+      "fixture/one",
+      "fixture/two",
+      "fixture/one",
+      "fixture/two",
+    ]);
+    assert.ok(calls.every((call) => call.maxClaims === 1 && call.targetTaskId === null));
+    assert.deepEqual(
+      result.passes[0]?.projects.map((entry) => entry.workerProfile),
+      ["worker-a", "worker-b"],
+    );
+    assert.equal(result.report.totals.runs, 2);
+    assert.equal(result.report.totals.failed, 1);
+    assert.equal(result.report.totals.estimatedCostUsd, 0.25);
+    assert.equal(result.report.runs[0]?.pullRequestUrl, "https://example.invalid/pull/1");
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("requires explicit enablement and global concurrency one", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  const controller = new AutopilotController(projects, runs, {
+    run: async () => resultFixture("fixture/one", "worker-a", false),
+  });
+  const base = {
+    enabled: false,
+    controllerId: "overnight",
+    leaseDurationMs: 1_000,
+    deadlineAt: Date.now() + 1_000,
+    maxNewClaims: 1,
+    maxNoProgressPasses: 1,
+    pollIntervalMs: 1,
+    globalConcurrency: 1 as const,
+  };
+  try {
+    await assert.rejects(controller.run(base), /explicit enable flag/);
+    await assert.rejects(
+      controller.run({ ...base, enabled: true, globalConcurrency: 2 as 1 }),
+      /global concurrency one/,
+    );
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("stops immediately at a human gate", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  let calls = 0;
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      calls += 1;
+      const result = resultFixture(request.projectId, "worker-a", false);
+      result.reconciliation.push({
+        runId: "run-gate",
+        taskId: "task-gate",
+        initialState: "verifying",
+        state: "waiting-human",
+        execution: "not-run",
+        lease: "acquired",
+        outcome: "waiting-human",
+        base: "current",
+        workspace: "present",
+        workerStatus: "succeeded",
+        workerSessionId: "session",
+        branchName: "agent/task",
+        pullRequestUrl: null,
+        pullRequestState: "none",
+        ciStatus: null,
+        failureReason: null,
+      });
+      return result;
+    },
+  });
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "overnight",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+    assert.equal(result.stopReason, "human-gate");
+    assert.equal(calls, 1);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("honors both the deadline and maximum-new-claim ceiling", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  let calls = 0;
+  let now = 100;
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      calls += 1;
+      return resultFixture(request.projectId, "worker-a", true);
+    },
+  }, { now: () => now, sleep: async () => undefined });
+  const base = {
+    enabled: true,
+    controllerId: "overnight",
+    leaseDurationMs: 1_000,
+    maxNewClaims: 1,
+    maxNoProgressPasses: 2,
+    pollIntervalMs: 1,
+    globalConcurrency: 1 as const,
+  };
+  try {
+    const deadline = await controller.run({ ...base, deadlineAt: 100 });
+    assert.equal(deadline.stopReason, "deadline");
+    assert.equal(calls, 0);
+
+    now = 101;
+    const bounded = await controller.run({ ...base, deadlineAt: 1_000 });
+    assert.equal(bounded.stopReason, "max-new-claims");
+    assert.equal(bounded.totalNewClaims, 1);
+    assert.equal(calls, 1);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+function projectsFixture(): ProjectRegistryStore {
+  const projects = new ProjectRegistryStore();
+  projects.register({
+    id: "fixture/one",
+    rootPath: "/fixture/one",
+    contractPath: "/fixture/one/.agent-runner.yml",
+    workerProfile: "worker-a",
+    contractVersion: 1,
+    now: 1,
+  });
+  projects.register({
+    id: "fixture/two",
+    rootPath: "/fixture/two",
+    contractPath: "/fixture/two/.agent-runner.yml",
+    workerProfile: "worker-b",
+    contractVersion: 1,
+    now: 1,
+  });
+  return projects;
+}
+
+function resultFixture(
+  project: string,
+  workerProfile: string,
+  claimed: boolean,
+): RunOnceResult {
+  const task = {
+    taskId: `${project}-task`,
+    runId: `${project}-run`,
+    state: "ci",
+    execution: "verified" as const,
+    worker: { name: "fixture", model: workerProfile, status: "succeeded" },
+    workspacePath: `/workspaces/${project}`,
+    delivery: "waiting-ci" as const,
+    pullRequestUrl: `https://example.invalid/${project}`,
+    ciStatus: "pending",
+    failureReason: null,
+  };
+  return {
+    ok: true,
+    dryRun: false,
+    targetTaskId: null,
+    project,
+    baseSha: "base-a",
+    workerProfile,
+    provider: "fixture",
+    dependencies: "fixture",
+    deliveryProvider: "fixture",
+    ready: [{ id: task.taskId, title: "Fixture" }],
+    waiting: [],
+    blocked: [],
+    completed: [],
+    claimed: claimed ? [task] : [],
+    reconciled: [],
+    reconciliation: [],
+    duplicateTaskIds: claimed ? [] : [task.taskId],
+    capacityReached: false,
+    limitReached: false,
+  };
+}
+
+function seedMorningReport(runs: RunStore): void {
+  const first = runs.claim({
+    projectId: "fixture/one",
+    taskId: "TASK-01",
+    revision: "one",
+    baseSha: "base-a",
+    workerId: "controller",
+    now: 1,
+    leaseDurationMs: 10,
+    maxAttempts: 2,
+  });
+  let run = runs.transition(first.run.id, "workspace-ready", 2);
+  run = runs.transition(run.id, "running", 3);
+  run = runs.transition(run.id, "verifying", 4, { headSha: "head-a" });
+  run = runs.transition(run.id, "verified", 5, { headSha: "head-a" });
+  run = runs.transition(run.id, "pr-open", 6);
+  runs.transition(run.id, "ci", 7);
+  runs.recordWorker(run.id, {
+    workerName: "fixture-agent",
+    status: "succeeded",
+    model: "model-a",
+    sessionId: "session-a",
+    summary: "done",
+    costUsd: 0.25,
+    durationMs: 10,
+  }, 8);
+  runs.recordDelivery(run.id, {
+    provider: "fixture",
+    externalId: "1",
+    url: "https://example.invalid/pull/1",
+    branchName: "agent/task-01",
+    baseBranch: "main",
+    baseSha: "base-a",
+    headSha: "head-a",
+    draft: true,
+    ciStatus: "pending",
+  }, 9);
+
+  const second = runs.claim({
+    projectId: "fixture/two",
+    taskId: "TASK-02",
+    revision: "two",
+    baseSha: "base-a",
+    workerId: "controller",
+    now: 1,
+    leaseDurationMs: 1,
+    maxAttempts: 1,
+  });
+  runs.reclaimExpired(second.run.id, "restarted", 3, 1);
+}
