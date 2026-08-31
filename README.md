@@ -29,6 +29,7 @@ command, but nothing runs in the background.
 | [Worker adapters](docs/worker-adapters.md) | Agent-neutral protocol and provider adapter boundary |
 | [Draft-PR delivery](docs/delivery.md) | Idempotent publication, persisted evidence, and CI states |
 | [One-shot run](docs/run-once.md) | Joined dry-run and bounded execution flow |
+| [Dogfood runbook](docs/dogfood-runbook.md) | Checklist and stop conditions for live repository-owned runs |
 | [Landscape](docs/landscape.md) | Recent systems reviewed and the current adopt/evaluate/build decisions |
 | [Implementation log](docs/implementation-log.md) | Chronological decisions, problems, and corrections across sessions |
 | [AGENTS.md](AGENTS.md) | Entry point for coding agents working on this repository |
