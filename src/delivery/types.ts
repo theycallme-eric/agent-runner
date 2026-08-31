@@ -22,6 +22,7 @@ export interface PullRequestSnapshot {
   baseBranch: string;
   headSha: string;
   draft: boolean;
+  state: "open" | "closed" | "merged";
 }
 
 export interface CiSnapshot {
@@ -32,6 +33,11 @@ export interface CiSnapshot {
 export interface PullRequestPublisher {
   readonly name: string;
   publishDraft(request: DraftPullRequestRequest): Promise<PullRequestSnapshot>;
+  inspectPullRequest(repository: string, externalId: string): Promise<PullRequestSnapshot | null>;
+  updateDraft(
+    request: DraftPullRequestRequest,
+    expected: PullRequestSnapshot,
+  ): Promise<PullRequestSnapshot>;
   checkCi(
     request: DraftPullRequestRequest,
     pullRequest: PullRequestSnapshot,

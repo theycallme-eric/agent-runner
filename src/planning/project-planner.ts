@@ -35,6 +35,11 @@ export interface ProjectPlan {
   limitReached: boolean;
 }
 
+export type ProjectInspection = Pick<
+  ProjectPlan,
+  "projectId" | "provider" | "dependencies" | "graph"
+>;
+
 export class ProjectPlanner {
   readonly #runs: RunStore;
   readonly #providers: TaskProviderRegistry;
@@ -53,8 +58,19 @@ export class ProjectPlanner {
   async claimReady(request: PlanProjectRequest): Promise<ProjectPlan> {
     validateRequest(request);
     const inspected = await this.inspect(request.project, request.contract);
+    return this.claimInspected(request, inspected);
+  }
+
+  claimInspected(request: PlanProjectRequest, inspected: ProjectInspection): ProjectPlan {
+    validateRequest(request);
+    if (inspected.projectId !== request.project.id) {
+      throw new Error("Project inspection does not match claim request");
+    }
     const provider = this.#providers.get(request.contract.tasks.provider);
     const dependencyResolver = this.#dependencies.get(request.contract.tasks.dependencies);
+    if (inspected.provider !== provider.name || inspected.dependencies !== dependencyResolver.name) {
+      throw new Error("Project inspection adapters do not match claim request");
+    }
     const graph = inspected.graph;
     const maxClaims = request.maxClaims ?? Number.POSITIVE_INFINITY;
     const readyTasks = selectReadyTasks(graph.ready, request.taskIds);
@@ -107,7 +123,7 @@ export class ProjectPlanner {
   async inspect(
     project: ProjectRegistration,
     contract: ProjectContract,
-  ): Promise<Pick<ProjectPlan, "projectId" | "provider" | "dependencies" | "graph">> {
+  ): Promise<ProjectInspection> {
     validateProject(project, contract);
     const provider = this.#providers.get(contract.tasks.provider);
     const dependencyResolver = this.#dependencies.get(contract.tasks.dependencies);

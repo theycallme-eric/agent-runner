@@ -6,8 +6,9 @@ import {
   type CapacityClaimResult,
   type ClaimRequest,
   type ClaimResult,
-  type ReclaimResult,
   type DeliveryCiStatus,
+  type LeaseAcquisitionResult,
+  type ReclaimResult,
   type RunDeliveryRecord,
   type RunExecutionRecord,
   type RunRecord,
@@ -21,9 +22,9 @@ const ALLOWED_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
   running: ["verifying", "failed"],
   verifying: ["synchronized", "verified", "waiting-human", "failed"],
   synchronized: ["verifying", "failed"],
-  verified: ["pr-open", "waiting-human", "failed"],
-  "pr-open": ["ci", "waiting-human", "failed"],
-  ci: ["completed", "waiting-human", "failed"],
+  verified: ["synchronized", "pr-open", "waiting-human", "failed"],
+  "pr-open": ["synchronized", "ci", "waiting-human", "failed"],
+  ci: ["synchronized", "completed", "waiting-human", "failed"],
   "waiting-human": ["pr-open", "ci", "completed", "failed"],
   completed: [],
   failed: [],
@@ -233,6 +234,13 @@ export class RunStore {
     return row ? mapRun(row) : null;
   }
 
+  listProject(projectId: string): RunRecord[] {
+    const rows = this.#database
+      .prepare("SELECT * FROM runs WHERE project_id = ? ORDER BY created_at, id")
+      .all(projectId) as unknown as RunRow[];
+    return rows.map(mapRun);
+  }
+
   findTask(projectId: string, taskId: string, revision: string): RunRecord | null {
     const row = this.#findTaskRow(projectId, taskId, revision);
     return row ? mapRun(row) : null;
@@ -346,6 +354,125 @@ export class RunStore {
       this.#database.exec("ROLLBACK;");
       throw error;
     }
+  }
+
+  resumeExpired(runId: string, workerId: string, now: number, leaseDurationMs: number): ReclaimResult {
+    this.#database.exec("BEGIN IMMEDIATE;");
+    try {
+      const row = this.#database
+        .prepare("SELECT * FROM runs WHERE id = ?")
+        .get(runId) as RunRow | undefined;
+      if (!row) {
+        this.#database.exec("COMMIT;");
+        return { outcome: "missing", run: null };
+      }
+      if (row.lease_expires_at === null || row.lease_expires_at > now) {
+        this.#database.exec("COMMIT;");
+        return { outcome: "not-stale", run: mapRun(row) };
+      }
+      if (!row.requires_reverification || !["synchronized", "verifying"].includes(row.state)) {
+        throw new Error(`Run ${runId} is not a resumable synchronization`);
+      }
+
+      const nextAttempt = row.attempt + 1;
+      if (nextAttempt > row.max_attempts) {
+        this.#database
+          .prepare(`
+            UPDATE runs
+            SET state = 'failed', failure_reason = 'attempts-exhausted',
+                lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+            WHERE id = ?
+          `)
+          .run(now, runId);
+        this.#event(runId, now, "attempts-exhausted", { previousOwner: row.lease_owner });
+        const failed = this.#require(runId);
+        this.#database.exec("COMMIT;");
+        return { outcome: "failed", run: failed };
+      }
+
+      this.#database
+        .prepare(`
+          UPDATE runs
+          SET lease_owner = ?, lease_expires_at = ?, attempt = ?,
+              failure_reason = NULL, updated_at = ?
+          WHERE id = ?
+        `)
+        .run(workerId, now + leaseDurationMs, nextAttempt, now, runId);
+      this.#event(runId, now, "synchronization-reclaimed", {
+        previousOwner: row.lease_owner,
+        workerId,
+        attempt: nextAttempt,
+        state: row.state,
+      });
+      const reclaimed = this.#require(runId);
+      this.#database.exec("COMMIT;");
+      return { outcome: "reclaimed", run: reclaimed };
+    } catch (error) {
+      this.#database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  acquireLease(
+    runId: string,
+    workerId: string,
+    now: number,
+    leaseDurationMs: number,
+  ): LeaseAcquisitionResult {
+    this.#database.exec("BEGIN IMMEDIATE;");
+    try {
+      const row = this.#database
+        .prepare("SELECT * FROM runs WHERE id = ?")
+        .get(runId) as RunRow | undefined;
+      if (!row) {
+        this.#database.exec("COMMIT;");
+        return { outcome: "missing", run: null };
+      }
+      if (["completed", "failed"].includes(row.state)) {
+        this.#database.exec("COMMIT;");
+        return { outcome: "terminal", run: mapRun(row) };
+      }
+      if (
+        row.lease_expires_at !== null &&
+        row.lease_expires_at > now &&
+        row.lease_owner !== workerId
+      ) {
+        this.#database.exec("COMMIT;");
+        return { outcome: "live", run: mapRun(row) };
+      }
+      this.#database
+        .prepare(`
+          UPDATE runs
+          SET lease_owner = ?, lease_expires_at = ?, updated_at = ?
+          WHERE id = ?
+        `)
+        .run(workerId, now + leaseDurationMs, now, runId);
+      this.#event(runId, now, "lease-acquired", {
+        workerId,
+        leaseExpiresAt: now + leaseDurationMs,
+      });
+      const acquired = this.#require(runId);
+      this.#database.exec("COMMIT;");
+      return { outcome: "acquired", run: acquired };
+    } catch (error) {
+      this.#database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  releaseLease(runId: string, workerId: string, now: number): boolean {
+    const result = this.#database
+      .prepare(`
+        UPDATE runs
+        SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+        WHERE id = ? AND lease_owner = ?
+      `)
+      .run(now, runId, workerId);
+    if (result.changes === 1) {
+      this.#event(runId, now, "lease-released", { workerId });
+      return true;
+    }
+    return false;
   }
 
   events(runId: string): Array<{ type: string; at: number; detail: unknown }> {

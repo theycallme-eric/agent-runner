@@ -22,6 +22,16 @@ interface RawPullRequest {
   headRefOid?: unknown;
 }
 
+interface RawApiPullRequest {
+  number?: unknown;
+  html_url?: unknown;
+  draft?: unknown;
+  state?: unknown;
+  merged_at?: unknown;
+  head?: unknown;
+  base?: unknown;
+}
+
 interface RawCheck {
   name?: unknown;
   bucket?: unknown;
@@ -92,14 +102,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
       throw new Error("Pull-request list changed unexpectedly");
     }
     if (!pullRequest.draft) {
-      await this.#gh([
-        "pr",
-        "ready",
-        pullRequest.externalId,
-        "--repo",
-        request.repository,
-        "--undo",
-      ]);
+      return pullRequest;
     }
     await this.#gh([
       "pr",
@@ -117,6 +120,67 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
       throw new Error(`Pull request for ${request.branchName} disappeared after reconciliation`);
     }
     return refreshed[0];
+  }
+
+  async inspectPullRequest(
+    repository: string,
+    externalId: string,
+  ): Promise<PullRequestSnapshot | null> {
+    validateIdentity(repository, externalId);
+    let output: string;
+    try {
+      output = await this.#gh([
+        "api",
+        `repos/${repository}/pulls/${externalId}`,
+        "--header",
+        "X-GitHub-Api-Version: 2026-03-10",
+      ]);
+    } catch (error) {
+      if (isGitHubNotFound(error)) {
+        return null;
+      }
+      throw error;
+    }
+    return parsePullRequest(output);
+  }
+
+  async updateDraft(
+    request: DraftPullRequestRequest,
+    expected: PullRequestSnapshot,
+  ): Promise<PullRequestSnapshot> {
+    validateRequest(request);
+    const before = await this.inspectPullRequest(request.repository, expected.externalId);
+    if (!before || !samePullRequest(before, expected)) {
+      throw new Error(`Pull request ${expected.externalId} changed before draft update`);
+    }
+    if (before.state !== "open" || !before.draft) {
+      throw new Error(`Pull request ${expected.externalId} is not an open draft`);
+    }
+    const localHead = await this.#git(request.workspacePath, ["rev-parse", "HEAD"]);
+    if (localHead !== request.headSha) {
+      throw new Error(`Workspace HEAD ${localHead} does not match verified head ${request.headSha}`);
+    }
+    await this.#git(request.workspacePath, [
+      "push",
+      "origin",
+      `HEAD:refs/heads/${request.branchName}`,
+    ]);
+    await this.#gh([
+      "pr",
+      "edit",
+      expected.externalId,
+      "--repo",
+      request.repository,
+      "--title",
+      request.title,
+      "--body",
+      request.body,
+    ]);
+    const refreshed = await this.inspectPullRequest(request.repository, expected.externalId);
+    if (!refreshed) {
+      throw new Error(`Pull request ${expected.externalId} disappeared after draft update`);
+    }
+    return refreshed;
   }
 
   async checkCi(
@@ -225,8 +289,36 @@ export function parsePullRequests(source: string): PullRequestSnapshot[] {
       branchName: stringValue(raw.headRefName, `pullRequests[${index}].headRefName`),
       baseBranch: stringValue(raw.baseRefName, `pullRequests[${index}].baseRefName`),
       headSha: stringValue(raw.headRefOid, `pullRequests[${index}].headRefOid`),
+      state: "open" as const,
     };
   });
+}
+
+export function parsePullRequest(source: string): PullRequestSnapshot {
+  const value = JSON.parse(source) as unknown;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("GitHub pull-request response must be an object");
+  }
+  const raw = value as RawApiPullRequest;
+  const head = nestedRef(raw.head, "pullRequest.head");
+  const base = nestedRef(raw.base, "pullRequest.base");
+  const state = stringValue(raw.state, "pullRequest.state");
+  const merged = typeof raw.merged_at === "string" && raw.merged_at.trim() !== "";
+  if (!merged && state !== "open" && state !== "closed") {
+    throw new Error(`Unsupported GitHub pull-request state: ${state}`);
+  }
+  const normalizedState: PullRequestSnapshot["state"] = merged
+    ? "merged"
+    : state as "open" | "closed";
+  return {
+    externalId: String(positiveInteger(raw.number, "pullRequest.number")),
+    url: stringValue(raw.html_url, "pullRequest.html_url"),
+    draft: booleanValue(raw.draft, "pullRequest.draft"),
+    branchName: head.ref,
+    baseBranch: base.ref,
+    headSha: head.sha,
+    state: normalizedState,
+  };
 }
 
 export function parseChecks(source: string): CiSnapshot {
@@ -263,9 +355,7 @@ export function parseChecks(source: string): CiSnapshot {
 }
 
 function validateRequest(request: DraftPullRequestRequest): void {
-  if (!REPOSITORY.test(request.repository)) {
-    throw new Error(`GitHub repository must be owner/name: ${request.repository}`);
-  }
+  validateRepository(request.repository);
   if (
     !BRANCH.test(request.branchName) ||
     request.branchName.includes("..") ||
@@ -285,6 +375,50 @@ function validateRequest(request: DraftPullRequestRequest): void {
       throw new Error(`${path} must be non-empty`);
     }
   }
+}
+
+function validateIdentity(repository: string, externalId: string): void {
+  validateRepository(repository);
+  if (!/^[1-9][0-9]*$/.test(externalId)) {
+    throw new Error(`GitHub pull-request id must be a positive integer: ${externalId}`);
+  }
+}
+
+function validateRepository(repository: string): void {
+  if (!REPOSITORY.test(repository)) {
+    throw new Error(`GitHub repository must be owner/name: ${repository}`);
+  }
+}
+
+function nestedRef(value: unknown, path: string): { ref: string; sha: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${path} must be an object`);
+  }
+  const record = value as { ref?: unknown; sha?: unknown };
+  return {
+    ref: stringValue(record.ref, `${path}.ref`),
+    sha: stringValue(record.sha, `${path}.sha`),
+  };
+}
+
+function samePullRequest(left: PullRequestSnapshot, right: PullRequestSnapshot): boolean {
+  return left.externalId === right.externalId &&
+    left.url === right.url &&
+    left.branchName === right.branchName &&
+    left.baseBranch === right.baseBranch &&
+    left.headSha === right.headSha &&
+    left.draft === right.draft &&
+    left.state === right.state;
+}
+
+function isGitHubNotFound(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || Array.isArray(error)) {
+    return false;
+  }
+  const failure = error as { code?: unknown; stderr?: unknown };
+  return failure.code === 1 &&
+    typeof failure.stderr === "string" &&
+    /\(HTTP 404\)\s*$/u.test(failure.stderr);
 }
 
 function stringValue(value: unknown, path: string): string {

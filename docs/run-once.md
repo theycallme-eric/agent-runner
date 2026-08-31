@@ -11,8 +11,8 @@ agent-runner run-once owner/repository \
 
 The command loads the project registration and contract, validates the selected controller-owned
 worker profile and delivery adapter, refreshes the remote base, reads and validates the task DAG,
-claims bounded ready work, creates isolated worktrees, invokes workers, independently verifies and
-commits their changes, and creates or reconciles draft pull requests. It never merges.
+reconciles existing durable runs, then claims bounded ready work. New claims use isolated worktrees,
+selected workers, independent verification, and draft-only delivery. It never merges.
 
 Safe defaults are one new claim, a five-minute claim lease, the controller database beside a
 `workspaces/` directory, and the local worker-profile config. `--limit` may be raised up to the
@@ -34,17 +34,20 @@ worktree, launch a worker, push a branch, or publish a pull request.
 
 ## Repeated runs
 
-A task revision already present in the run ledger is never claimed twice. If that existing run is at
-`verified`, `pr-open`, or `ci`, another `run-once` reconciles the same persisted branch/pull request
-and polls CI without relaunching the worker. Completed and failed runs remain visible duplicates.
-General stale-lease/workspace recovery and base synchronization are RECON-01, not hidden behavior in
-this first command.
+A task revision already present in the run ledger is never claimed twice. Every mutating pass first
+classifies nonterminal runs by lease, workspace, worker evidence, branch, pull request, CI, and base.
+Live leases are not stolen. Expired active attempts are reclaimed within their budget. Published runs
+use their persisted pull-request identity and poll CI without relaunching the worker or republishing.
+If the base advanced, the controller checkpoints synchronization, merges in the isolated worktree,
+reruns every required verification command, and only then updates the same draft. Conflicts, missing
+workspaces, changed or closed pull requests, and exhausted attempts fail with durable evidence. See
+[Reconciliation](reconciliation.md).
 
 GitHub repositories with no required checks report CI as `none`. That is a valid observation, not a
 passed check suite: the run remains at `ci` with `waiting-ci`, the pull request remains a draft, and
 human review is still required.
 
-The JSON result reports the inspected graph, new claims, reconciled deliveries, duplicate task ids,
-capacity/limit stops, non-secret worker identity, workspace, pull-request URL, CI state, and failure
-reason. Any task or delivery failure sets `ok: false` and a non-zero process exit status while still
-printing the full batch result.
+The JSON result reports the inspected graph, detailed reconciliation classifications, new claims,
+duplicate task ids, capacity/limit stops, non-secret worker identity, workspace, pull-request URL,
+CI state, and failure reason. Any task or reconciliation failure sets `ok: false` and a non-zero
+process exit status while still printing the full batch result.

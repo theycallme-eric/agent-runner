@@ -8,6 +8,7 @@ import type { DraftPullRequestRequest } from "../src/delivery/types.js";
 import {
   GitHubPullRequestPublisher,
   parseChecks,
+  parsePullRequest,
   parsePullRequests,
   recoverChecksOutput,
 } from "../src/github/pull-request-publisher.js";
@@ -30,7 +31,18 @@ test("normalizes draft pull requests and required check buckets", () => {
     branchName: "agent-runner/task-42",
     baseBranch: "main",
     headSha: "head-a",
+    state: "open",
   }]);
+
+  assert.equal(parsePullRequest(JSON.stringify({
+    number: 42,
+    html_url: "https://github.com/example/repo/pull/42",
+    draft: true,
+    state: "closed",
+    merged_at: "2026-08-31T00:00:00Z",
+    head: { ref: "agent-runner/task-42", sha: "head-a" },
+    base: { ref: "main", sha: "base-a" },
+  })).state, "merged");
 
   assert.equal(parseChecks("[]").status, "none");
   assert.equal(parseChecks(JSON.stringify([{ name: "test", bucket: "pending", link: "" }])).status, "pending");
@@ -79,15 +91,19 @@ test("pushes and reconciles the same GitHub draft pull request", async () => {
   try {
     const first = await publisher.publishDraft(request);
     const second = await publisher.publishDraft(request);
+    const observed = await publisher.inspectPullRequest(request.repository, second.externalId);
+    assert.ok(observed);
+    const updated = await publisher.updateDraft(request, observed);
     const ci = await publisher.checkCi(request, second);
     const log = readFileSync(calls, "utf8");
 
     assert.equal(first.externalId, "7");
     assert.deepEqual(second, first);
+    assert.deepEqual(updated, first);
     assert.equal(ci.status, "passed");
     assert.equal((log.match(/^gh create$/gm) ?? []).length, 1);
-    assert.equal((log.match(/^gh edit$/gm) ?? []).length, 2);
-    assert.equal((log.match(/^git push$/gm) ?? []).length, 2);
+    assert.equal((log.match(/^gh edit$/gm) ?? []).length, 3);
+    assert.equal((log.match(/^git push$/gm) ?? []).length, 3);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -137,6 +153,18 @@ if (args[0] === "pr" && args[1] === "list") {
 } else if (args[0] === "pr" && args[1] === "checks") {
   append("gh checks");
   process.stdout.write(JSON.stringify([{ name: "verify", bucket: "pass", link: "" }]));
+} else if (args[0] === "api") {
+  append("gh inspect");
+  const state = JSON.parse(fs.readFileSync(statePath, "utf8"))[0];
+  process.stdout.write(JSON.stringify({
+    number: state.number,
+    html_url: state.url,
+    draft: state.isDraft,
+    state: "open",
+    merged_at: null,
+    head: { ref: state.headRefName, sha: state.headRefOid },
+    base: { ref: state.baseRefName, sha: "base-a" }
+  }));
 } else {
   process.stderr.write("unexpected gh arguments: " + JSON.stringify(args));
   process.exit(2);

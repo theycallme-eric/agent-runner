@@ -14,10 +14,11 @@ pluggable task and dependency adapters, and enforces task uniqueness and per-pro
 SQLite. It also simulates controller-owned verification, base synchronization, CI, retries, and human
 gates. The concrete execution service now connects a claim to an exact-base worktree, a selected
 worker adapter, independent commands, a locally committed verified head, and durable evidence. Real
-work can now be launched explicitly with bounded `run-once`; unattended execution remains disabled
-until restart reconciliation and bounded scheduling exist. GitHub issue/dependency discovery,
-controller-owned worker profiles, and idempotent draft-PR publication are connected through that
-command, but nothing runs in the background.
+work can now be launched explicitly with bounded `run-once`. Each mutating pass reconciles durable
+runs before claiming new work: it respects live leases, reclaims expired attempts, observes existing
+drafts by persisted identity, synchronizes advanced bases, and reruns required verification.
+Unattended execution remains disabled until bounded scheduling and reporting exist; nothing runs in
+the background yet.
 
 ## Start here
 
@@ -29,6 +30,7 @@ command, but nothing runs in the background.
 | [Worker adapters](docs/worker-adapters.md) | Agent-neutral protocol and provider adapter boundary |
 | [Draft-PR delivery](docs/delivery.md) | Idempotent publication, persisted evidence, and CI states |
 | [One-shot run](docs/run-once.md) | Joined dry-run and bounded execution flow |
+| [Reconciliation](docs/reconciliation.md) | Restart, advanced-base, PR, and CI convergence rules |
 | [Landscape](docs/landscape.md) | Recent systems reviewed and the current adopt/evaluate/build decisions |
 | [Implementation log](docs/implementation-log.md) | Chronological decisions, problems, and corrections across sessions |
 | [AGENTS.md](AGENTS.md) | Entry point for coding agents working on this repository |
@@ -43,13 +45,11 @@ npm run validate:fixture
 npm run verify
 ```
 
-The suite currently proves that duplicate claims are rejected, stale work is reclaimed without a
-second run, exhausted workers fail visibly, controller restarts preserve state, invalid transitions
-fail closed, false worker success is rejected, advanced bases force re-verification, protected paths
-wait for a human, failing CI cannot complete a run, workers are replaceable, and a task branch starts
-in an isolated worktree at the selected base commit. The full claim-to-verified-workspace fixture
-also rejects worker crashes, success without changes, failed independent verification, and a base
-that advances before the verified head is recorded.
+The suite currently proves that duplicate claims are rejected, expired attempts are bounded, live
+leases cannot be stolen, controller restarts preserve state, false worker success is rejected,
+advanced bases are merged and fully reverified, conflicts are restored and reported, protected paths
+wait for a human, changed/closed/merged drafts fail closed, pending CI is polled without republishing,
+and workers remain replaceable.
 
 ## Current CLI
 
@@ -122,5 +122,5 @@ will add only the adapter after the controller passes its simulator and fixture-
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License: not selected yet
-- Next decision gate: publish the first live repository-owned dogfood draft PR and add restart/base
-  reconciliation
+- Next decision gate: prove restart/base reconciliation against the live dogfood draft, then add the
+  bounded multi-project scheduler and morning report

@@ -72,14 +72,14 @@ test("reconciles one draft pull request across pending and passing CI", async ()
     assert.equal(first.run.state, "ci");
     assert.equal(second.outcome, "completed");
     assert.equal(second.run.state, "completed");
-    assert.equal(publisher.publishCalls, 2);
+    assert.equal(publisher.publishCalls, 1);
     assert.deepEqual([...publisher.externalIds], ["77"]);
     assert.equal(context.runs.delivery(context.runId)?.url, "https://example.invalid/pull/77");
     assert.equal(context.runs.delivery(context.runId)?.ciStatus, "passed");
 
     const third = await coordinator.deliver(context.request);
     assert.equal(third.outcome, "completed");
-    assert.equal(publisher.publishCalls, 2);
+    assert.equal(publisher.publishCalls, 1);
   } finally {
     context.runs.close();
   }
@@ -190,6 +190,7 @@ test("a retry cannot replace the persisted pull request identity", async () => {
 
   try {
     assert.equal((await coordinator.deliver(context.request)).outcome, "waiting-ci");
+    publisher.driftExternalId("103");
     const drifted = await coordinator.deliver(context.request);
 
     assert.equal(drifted.outcome, "failed");
@@ -232,6 +233,9 @@ function setup(changedPaths = ["src/app.ts"]): {
     commit: async () => {
       throw new Error("Delivery must not commit");
     },
+    synchronize: async () => {
+      throw new Error("Delivery must not synchronize");
+    },
   };
   return {
     runs,
@@ -244,6 +248,7 @@ function setup(changedPaths = ["src/app.ts"]): {
 interface FakePublisher extends PullRequestPublisher {
   publishCalls: number;
   externalIds: Set<string>;
+  driftExternalId(externalId: string): void;
 }
 
 function fakePublisher(
@@ -253,6 +258,7 @@ function fakePublisher(
     pullRequest: PullRequestSnapshot,
   ) => Promise<CiSnapshot>,
 ): FakePublisher {
+  let observed: PullRequestSnapshot | null = null;
   return {
     name: "fixture-forge",
     publishCalls: 0,
@@ -261,7 +267,26 @@ function fakePublisher(
       this.publishCalls += 1;
       const result = await publish(request, this.publishCalls);
       this.externalIds.add(result.externalId);
+      observed = result;
       return result;
+    },
+    async inspectPullRequest() {
+      return observed;
+    },
+    async updateDraft(request, expected) {
+      const result = pullRequest(request, expected.externalId);
+      observed = result;
+      return result;
+    },
+    driftExternalId(externalId) {
+      if (!observed) {
+        throw new Error("No pull request exists to drift");
+      }
+      observed = {
+        ...observed,
+        externalId,
+        url: `https://example.invalid/pull/${externalId}`,
+      };
     },
     checkCi,
   };
@@ -275,6 +300,7 @@ function pullRequest(request: DraftPullRequestRequest, externalId: string): Pull
     baseBranch: request.baseBranch,
     headSha: request.headSha,
     draft: true,
+    state: "open",
   };
 }
 

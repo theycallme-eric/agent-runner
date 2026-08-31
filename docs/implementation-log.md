@@ -261,3 +261,29 @@ transcripts or secrets here.
   `none` is intentionally not treated as passed; the pull request remains draft and unmerged.
 - Next open decision: human review of draft PR #8 and implementation of RECON-01 before any unattended
   scheduler is enabled.
+
+## 2026-08-31 — Durable restart and advanced-base reconciliation
+
+- Audited the joined lifecycle against RECON-01. The existing retry path safely prevented duplicates
+  but still pushed/edited a persisted draft on every CI poll, and delivery treated an advanced base as
+  terminal. Those behaviors were safe one-shot defaults, not restart convergence.
+- Added atomic reconciliation leases separate from new-task claims. Live ownership cannot be stolen;
+  expired active work reclaims within the configured attempt budget; interrupted synchronization
+  preserves its state and consumes a bounded recovery attempt; reconciliation leases are released.
+- Split pull-request observation from creation and update. After initial persistence, provider plus
+  external id are authoritative. Pending CI is polled without another push/edit. Missing, non-draft,
+  changed-head, closed, merged, or identity-drifted pull requests fail visibly instead of being
+  replaced or silently changed back.
+- Added checkpointed advanced-base synchronization. The controller records the new base and required
+  reverification, merges it into the isolated worktree, aborts and restores on conflict, reruns every
+  required verification command with lease heartbeats, re-applies protected-path gates, and updates
+  the same draft only after the synchronized head passes.
+- `run-once` now reads one live DAG snapshot, reconciles every nonterminal project run first, then
+  claims from that same snapshot. Structured output includes lease, workspace, worker session,
+  branch, pull-request, CI, base, and failure classifications.
+- Evidence: `npm run verify` passes with 70 deterministic tests. Coverage includes real Git clean
+  synchronization and conflict restoration; live-lease refusal; expired-attempt exhaustion; missing
+  workspaces; closed/merged drafts; advanced-base reverification; same-draft update; and later CI-only
+  polling with no worker, publish, push, or edit.
+- Next open decision: publish RECON-01, exercise it against live draft PR #8, then implement AUTO-01's
+  explicitly enabled bounded multi-project loop and morning report.
