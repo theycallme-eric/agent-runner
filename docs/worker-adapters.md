@@ -22,6 +22,28 @@ The controller registry maps a project to a named worker profile. `WorkerProfile
 that profile to a configured adapter at execution time, so the claim and lifecycle code never needs
 to know which agent or model is behind it.
 
+## Controller-owned profiles
+
+Worker profiles live in a versioned local YAML file, not in product repositories. The default is
+`~/.config/agent-runner/workers.yml`; `AGENT_RUNNER_WORKER_CONFIG` or the CLI `--profiles` option may
+select another location. A complete non-secret template is available at
+[`examples/workers.yml`](../examples/workers.yml).
+
+Claude profiles require an explicit model, turn limit, and local usage guard. Tool selection,
+setting sources, session persistence, and executable have isolated defaults when omitted. JSON
+process profiles name an executable and optional argument list. Both adapters accept environment
+entries only as references:
+
+```yaml
+environment:
+  PROVIDER_TOKEN:
+    fromEnv: PROVIDER_TOKEN
+```
+
+The loader resolves the value only in memory. Status output reports the source variable name, never
+the value. Inline environment values, missing variables, unknown fields/adapters, duplicate profile
+ids, and executable strings containing shell syntax fail closed.
+
 ## Native adapters
 
 `ClaudeCodeWorker` invokes Claude Code with explicit model, tool, permission, setting-source, MCP,
@@ -68,4 +90,5 @@ A worker success report is never sufficient to complete a run. Agent Runner inde
 workspace, runs project verification, rejects an advanced base, evaluates protected paths, and
 records a committed verified head. The simulator proves full re-verification after synchronization;
 the concrete executor currently stops safely on an advanced base until reconciliation is connected.
-CI and pull-request state belong to the next delivery slice.
+The separate delivery coordinator then owns draft pull-request identity and CI observation without
+granting the worker publication or merge authority.

@@ -20,6 +20,7 @@ export interface ClaudeCodeWorkerOptions {
   tools: string[];
   settingSources: Array<"user" | "project" | "local">;
   persistSession: boolean;
+  environment?: Record<string, string>;
 }
 
 export class ClaudeCodeWorker implements WorkerAdapter {
@@ -28,7 +29,11 @@ export class ClaudeCodeWorker implements WorkerAdapter {
 
   constructor(options: ClaudeCodeWorkerOptions) {
     validateOptions(options);
-    this.#options = { ...options, executable: options.executable ?? "claude" };
+    this.#options = {
+      ...options,
+      executable: options.executable ?? "claude",
+      environment: options.environment ?? {},
+    };
   }
 
   run(request: WorkerRequest): Promise<WorkerOutcome> {
@@ -64,7 +69,11 @@ export class ClaudeCodeWorker implements WorkerAdapter {
     return new Promise((resolve, reject) => {
       const child = spawn(this.#options.executable, argumentsList, {
         cwd: request.workspacePath,
-        env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+        env: {
+          ...process.env,
+          ...this.#options.environment,
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+        },
         stdio: ["ignore", "pipe", "pipe"],
       });
       let stdout = "";

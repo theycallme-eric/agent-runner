@@ -1,0 +1,27 @@
+version: 1
+profiles:
+  claude-fable:
+    adapter: claude-code
+    executable: claude
+    model: fable
+    maxBudgetUsd: 5
+    maxTurns: 50
+    tools:
+      - Read
+      - Write
+      - Edit
+      - Bash
+      - Glob
+      - Grep
+    settingSources:
+      - project
+    persistSession: false
+
+  any-json-agent:
+    adapter: json-process
+    name: any-json-agent
+    executable: agent-runner-json-worker
+    arguments: []
+    environment:
+      PROVIDER_TOKEN:
+        fromEnv: PROVIDER_TOKEN

@@ -3,4 +3,5 @@ dist/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+.agent-runner.local-workers.yml
 .DS_Store

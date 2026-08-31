@@ -21,6 +21,12 @@ export class WorkerProfileRegistry {
     }
     return worker;
   }
+
+  list(): Array<{ profile: string; worker: string }> {
+    return [...this.#profiles.entries()]
+      .map(([profile, worker]) => ({ profile, worker: worker.name }))
+      .sort((left, right) => left.profile.localeCompare(right.profile));
+  }
 }
 
 function validateProfile(profile: string): void {

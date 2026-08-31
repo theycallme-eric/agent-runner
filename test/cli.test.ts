@@ -11,6 +11,7 @@ test("registers and lists a fixture project through the public CLI", () => {
   const state = join(directory, "state", "controller.sqlite");
   const cli = resolve("dist/src/cli.js");
   const gh = join(directory, "fake-gh");
+  const workerConfig = join(directory, "workers.yml");
   try {
     mkdirSync(project);
     writeFileSync(
@@ -55,6 +56,18 @@ execution: { concurrency: 1, attempts: 2, timeoutMinutes: 10 }
 delivery: { pullRequest: true, merge: never }
 `,
     );
+    writeFileSync(
+      workerConfig,
+      `version: 1
+profiles:
+  fixture-worker:
+    adapter: json-process
+    name: fixture-agent
+    executable: fixture-agent
+    environment:
+      TOKEN: { fromEnv: CLI_FIXTURE_SECRET }
+`,
+    );
 
     const registered = JSON.parse(
       execFileSync(process.execPath, [cli, "register", project, "--worker", "fixture-worker", "--state", state], {
@@ -70,6 +83,17 @@ delivery: { pullRequest: true, merge: never }
         env: { ...process.env, AGENT_RUNNER_GH_BIN: gh },
       }),
     ) as { ready: Array<{ id: string; title: string }>; edges: number };
+    const profilesOutput = execFileSync(
+      process.execPath,
+      [cli, "profiles", "--profiles", workerConfig],
+      {
+        encoding: "utf8",
+        env: { ...process.env, CLI_FIXTURE_SECRET: "must-not-be-printed" },
+      },
+    );
+    const profiles = JSON.parse(profilesOutput) as {
+      profiles: Array<{ profile: string; adapter: string; environmentVariables: string[] }>;
+    };
 
     assert.deepEqual(registered, {
       created: true,
@@ -88,6 +112,14 @@ delivery: { pullRequest: true, merge: never }
     ]);
     assert.deepEqual(ready.ready, [{ id: "issue-1", title: "Fixture task" }]);
     assert.equal(ready.edges, 0);
+    assert.deepEqual(profiles.profiles, [{
+      profile: "fixture-worker",
+      adapter: "json-process",
+      worker: "fixture-agent",
+      model: null,
+      environmentVariables: ["CLI_FIXTURE_SECRET"],
+    }]);
+    assert.equal(profilesOutput.includes("must-not-be-printed"), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

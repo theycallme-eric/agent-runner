@@ -22,6 +22,9 @@ async function main(): Promise<void> {
     case "ready":
       await readyCommand(argumentsList);
       return;
+    case "profiles":
+      await profilesCommand(argumentsList);
+      return;
     default:
       usage();
   }
@@ -153,6 +156,13 @@ async function readyCommand(argumentsList: string[]): Promise<void> {
   }
 }
 
+async function profilesCommand(argumentsList: string[]): Promise<void> {
+  const path = workerConfigPathFrom(argumentsList);
+  const { loadWorkerProfiles } = await import("./workers/config.js");
+  const loaded = await loadWorkerProfiles(path);
+  print({ path, profiles: loaded.summaries });
+}
+
 async function resolveContractPath(input: string): Promise<string> {
   const path = resolve(input);
   try {
@@ -173,6 +183,17 @@ function statePathFrom(argumentsList: string[]): string {
     : join(homedir(), ".local", "state", "agent-runner", "state.sqlite");
 }
 
+function workerConfigPathFrom(argumentsList: string[]): string {
+  const explicit = option(argumentsList, "--profiles");
+  if (explicit) {
+    return resolve(explicit);
+  }
+  const configured = process.env.AGENT_RUNNER_WORKER_CONFIG;
+  return configured
+    ? resolve(configured)
+    : join(homedir(), ".config", "agent-runner", "workers.yml");
+}
+
 function option(argumentsList: string[], name: string): string | null {
   const index = argumentsList.indexOf(name);
   const value = index === -1 ? undefined : argumentsList[index + 1];
@@ -189,7 +210,8 @@ function usage(): void {
   agent-runner register <project-root> --worker <profile> [--state <database>]
   agent-runner projects [--state <database>]
   agent-runner status [--state <database>]
-  agent-runner ready <project-id> [--state <database>]`);
+  agent-runner ready <project-id> [--state <database>]
+  agent-runner profiles [--profiles <worker-config>]`);
   process.exitCode = 2;
 }
 

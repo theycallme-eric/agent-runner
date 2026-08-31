@@ -14,9 +14,9 @@ pluggable task and dependency adapters, and enforces task uniqueness and per-pro
 SQLite. It also simulates controller-owned verification, base synchronization, CI, retries, and human
 gates. The concrete execution service now connects a claim to an exact-base worktree, a selected
 worker adapter, independent commands, a locally committed verified head, and durable evidence. Real
-unattended CLI execution remains disabled until profile loading, reconciliation, and delivery are
-connected through one command. GitHub issue/dependency discovery and idempotent draft-PR publication
-adapters exist, but nothing runs in the background.
+unattended CLI execution remains disabled until the joined run command, restart reconciliation, and
+bounded scheduling exist. GitHub issue/dependency discovery, controller-owned worker profiles, and
+idempotent draft-PR publication exist, but nothing runs in the background.
 
 ## Start here
 
@@ -57,6 +57,7 @@ node dist/src/cli.js validate fixtures/project
 node dist/src/cli.js register /path/to/project --worker claude-fable
 node dist/src/cli.js status
 node dist/src/cli.js ready <project-id>
+node dist/src/cli.js profiles --profiles /path/to/workers.yml
 ```
 
 `register` reads the standard contract and stores the project location plus worker-profile selection
@@ -66,6 +67,11 @@ different controller database.
 
 The built-in GitHub adapter reads issues and GitHub's native `blocked by` relationships. `ready` is
 read-only: it refreshes and validates the DAG but does not claim work or launch an agent.
+
+`profiles` validates controller-owned worker configuration and prints only non-secret metadata. The
+default path is `~/.config/agent-runner/workers.yml`; `--profiles` or
+`AGENT_RUNNER_WORKER_CONFIG` selects another file. See the checked-in
+[example](examples/workers.yml).
 
 ## Coding-agent support
 
@@ -108,5 +114,5 @@ will add only the adapter after the controller passes its simulator and fixture-
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License: not selected yet
-- Next decision gate: load controller-owned worker profiles and expose the joined
-  plan/execution/delivery flow through an explicit one-shot command
+- Next decision gate: expose the joined plan/execution/delivery flow through an explicit one-shot
+  command

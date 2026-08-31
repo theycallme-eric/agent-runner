@@ -165,3 +165,24 @@ transcripts or secrets here.
   reconciles twice, pushes the verified head, and reports required CI without network access.
 - Next open decision: load controller-owned worker profiles, join plan → execute → deliver in a
   one-shot command, then publish a real repository-owned dogfood draft pull request through it.
+
+## 2026-08-31 — Controller-owned worker profiles
+
+- Closed DELIVERY-01 after publishing commit `a319edd`, then expanded the real GitHub DAG. PROFILE-01
+  is ready; CLI-01 waits on it; RECON-01 waits on CLI-01; AUTO-01 waits on reconciliation; and the
+  first live DOGFOOD-01 PR can run in parallel after CLI-01. The live graph reports two completed,
+  one ready, four waiting, and five edges.
+- Added a versioned local worker-profile loader for `claude-code` and the agent-neutral JSON process
+  protocol. Project registration keeps only the selected profile id; product contracts still contain
+  no worker, model, authentication, or quota settings.
+- Added environment-variable references resolved only in memory. CLI profile listing exposes source
+  variable names and adapter/model metadata but never resolved values. Inline values and missing
+  variables fail closed.
+- Added strict schema, duplicate-key, adapter, executable, profile-id, setting-source, numeric-limit,
+  and unknown-field validation. Executables are spawned directly and shell syntax is rejected.
+- Extended the Claude adapter with profile-owned environment overrides while retaining strict MCP,
+  browser, session, and setting-source isolation.
+- Evidence: 55 deterministic tests pass. Both configured adapter types execute against fake binaries;
+  a sentinel secret reaches each process but is absent from profile summaries and CLI output.
+- Next open decision: publish PROFILE-01, then implement CLI-01 by joining the existing planner,
+  executor, delivery coordinator, profile loader, and GitHub adapters behind `run-once`/`--dry-run`.
