@@ -287,3 +287,12 @@ transcripts or secrets here.
   polling with no worker, publish, push, or edit.
 - Next open decision: publish RECON-01, exercise it against live draft PR #8, then implement AUTO-01's
   explicitly enabled bounded multi-project loop and morning report.
+
+### Live reconciliation preflight
+
+- A read-only three-way merge preview found that main's new reconciliation link and PR #8's dogfood
+  link were independent insertions at the same README table location, which Git would report as a
+  content conflict. Running the controller knowingly would have failed the immutable dogfood run.
+- Applied the already-approved dogfood link to main as the human conflict resolution before the live
+  pass. The synchronized PR can therefore retain the substantive runbook file while the controller
+  remains forbidden from guessing through merge conflicts.
