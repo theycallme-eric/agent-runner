@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "agent-runner": "dist/src/cli.js"
+  },
   "description": "Project-agnostic controller and reliability simulator for coding-agent work.",
   "engines": {
     "node": ">=24"

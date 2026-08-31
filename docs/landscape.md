@@ -42,14 +42,16 @@ durable controller. Treat it as a reference unless this project deliberately ado
 
 ## What remains genuinely missing
 
-- Multi-project registry and a versioned project contract
-- Normalized task providers, dependencies, atomic leases, and heartbeats
 - One task to one branch/workspace/session/PR ownership
 - Base-commit tracking, conflict prediction, and final-tree synchronization
 - Deterministic verification outside the implementing model
 - Independent review tied to the current pull-request head
 - Risk-tiered human gates and merge policy
 - Crash reconciliation, retry/no-progress budgets, audit events, and morning reports
+
+The local spike now contains the multi-project registry, versioned contract, normalized provider and
+dependency interfaces, DAG validation, atomic claims, leases, heartbeats, and per-project concurrency.
+Concrete forge adapters and the complete delivery loop remain open.
 
 ## Research sources
 

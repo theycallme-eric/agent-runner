@@ -61,6 +61,11 @@ The lifecycle core depends only on the normalized `WorkerAdapter` contract. Nati
 provider-specific features; the versioned JSON process adapter provides a universal wrapper path for
 other CLIs and SDKs. See [Worker adapters](worker-adapters.md).
 
+Project locations, enabled state, and worker-profile selection live in the controller's persistent
+registry. Task sources and dependency sources are separately named plug-ins. The planner normalizes
+their output, validates the DAG, and atomically claims ready revisions within each project's
+concurrency limit. See [Project onboarding](project-onboarding.md).
+
 ## Durable lifecycle
 
 ```text

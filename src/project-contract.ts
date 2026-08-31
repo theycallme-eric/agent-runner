@@ -9,8 +9,8 @@ export interface ProjectContract {
     baseBranch: string;
   };
   tasks: {
-    provider: "github";
-    dependencies: "github-native" | "external";
+    provider: string;
+    dependencies: string;
   };
   workspace: {
     setup: string[];
@@ -52,8 +52,6 @@ export function parseProjectContract(source: string): ProjectContract {
 
   const tasks = objectAt(root.tasks, "tasks");
   exactKeys(tasks, ["provider", "dependencies"], "tasks");
-  literal(tasks.provider, "github", "tasks.provider");
-  oneOf(tasks.dependencies, ["github-native", "external"], "tasks.dependencies");
 
   const workspace = objectAt(root.workspace, "workspace");
   exactKeys(workspace, ["setup"], "workspace");
@@ -86,8 +84,8 @@ export function parseProjectContract(source: string): ProjectContract {
       baseBranch: stringAt(project.baseBranch, "project.baseBranch"),
     },
     tasks: {
-      provider: "github",
-      dependencies: tasks.dependencies as ProjectContract["tasks"]["dependencies"],
+      provider: pluginIdAt(tasks.provider, "tasks.provider"),
+      dependencies: pluginIdAt(tasks.dependencies, "tasks.dependencies"),
     },
     workspace: {
       setup: stringArrayAt(workspace.setup, "workspace.setup"),
@@ -161,10 +159,12 @@ function literal(value: unknown, expected: string | number, path: string): void 
   }
 }
 
-function oneOf(value: unknown, options: readonly string[], path: string): void {
-  if (typeof value !== "string" || !options.includes(value)) {
-    throw new Error(`${path} must be one of: ${options.join(", ")}`);
+function pluginIdAt(value: unknown, path: string): string {
+  const result = stringAt(value, path);
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(result)) {
+    throw new Error(`${path} must be a lowercase plugin identifier`);
   }
+  return result;
 }
 
 function exactKeys(value: Record<string, unknown>, expected: readonly string[], path: string): void {

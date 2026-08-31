@@ -3,6 +3,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import {
   RUN_STATES,
+  type CapacityClaimResult,
   type ClaimRequest,
   type ClaimResult,
   type ReclaimResult,
@@ -66,11 +67,58 @@ export class RunStore {
   }
 
   claim(request: ClaimRequest): ClaimResult {
+    const result = this.#claimTransaction(request, null);
+    if (result.outcome === "capacity") {
+      throw new Error("Unbounded claim unexpectedly reached capacity");
+    }
+    return { claimed: result.outcome === "claimed", run: result.run };
+  }
+
+  claimWithinCapacity(request: ClaimRequest, maxActive: number): CapacityClaimResult {
+    if (!Number.isInteger(maxActive) || maxActive < 1) {
+      throw new Error("maxActive must be a positive integer");
+    }
+    return this.#claimTransaction(request, maxActive);
+  }
+
+  activeCount(projectId: string): number {
+    const row = this.#database
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM runs
+        WHERE project_id = ?
+          AND state IN ('claimed', 'workspace-ready', 'running', 'verifying', 'synchronized')
+      `)
+      .get(projectId) as { count: number };
+    return row.count;
+  }
+
+  #claimTransaction(request: ClaimRequest, maxActive: number | null): CapacityClaimResult {
     const id = randomUUID();
     const expiresAt = request.now + request.leaseDurationMs;
 
     this.#database.exec("BEGIN IMMEDIATE;");
     try {
+      const existing = this.#findTaskRow(request.projectId, request.taskId, request.revision);
+      if (existing) {
+        this.#database.exec("COMMIT;");
+        return { outcome: "duplicate", run: mapRun(existing) };
+      }
+      if (maxActive !== null) {
+        const active = this.#database
+          .prepare(`
+            SELECT COUNT(*) AS count
+            FROM runs
+            WHERE project_id = ?
+              AND state IN ('claimed', 'workspace-ready', 'running', 'verifying', 'synchronized')
+          `)
+          .get(request.projectId) as { count: number };
+        if (active.count >= maxActive) {
+          this.#database.exec("COMMIT;");
+          return { outcome: "capacity", run: null };
+        }
+      }
+
       const result = this.#database
         .prepare(`
           INSERT INTO runs (
@@ -107,7 +155,10 @@ export class RunStore {
         });
       }
       this.#database.exec("COMMIT;");
-      return { claimed: result.changes === 1, run: mapRun(row) } as ClaimResult;
+      return {
+        outcome: result.changes === 1 ? "claimed" : "duplicate",
+        run: mapRun(row),
+      };
     } catch (error) {
       this.#database.exec("ROLLBACK;");
       throw error;

@@ -31,3 +31,23 @@ test("rejects projects that attempt to opt into automatic merging", () => {
 
   assert.throws(() => parseProjectContract(autoMerge), /delivery\.merge must be "never"/);
 });
+
+test("accepts task providers and dependency adapters without changing the contract schema", () => {
+  const customProvider = fixture
+    .replace("provider: github", "provider: local-json")
+    .replace("dependencies: github-native", "dependencies: embedded-dag");
+
+  const contract = parseProjectContract(customProvider);
+
+  assert.equal(contract.tasks.provider, "local-json");
+  assert.equal(contract.tasks.dependencies, "embedded-dag");
+});
+
+test("rejects unsafe task provider identifiers", () => {
+  const unsafeProvider = fixture.replace("provider: github", "provider: GitHub Provider");
+
+  assert.throws(
+    () => parseProjectContract(unsafeProvider),
+    /tasks\.provider must be a lowercase plugin identifier/,
+  );
+});

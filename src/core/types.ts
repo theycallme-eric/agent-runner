@@ -46,6 +46,10 @@ export type ClaimResult =
   | { claimed: true; run: RunRecord }
   | { claimed: false; run: RunRecord };
 
+export type CapacityClaimResult =
+  | { outcome: "claimed" | "duplicate"; run: RunRecord }
+  | { outcome: "capacity"; run: null };
+
 export type ReclaimResult =
   | { outcome: "reclaimed"; run: RunRecord }
   | { outcome: "failed"; run: RunRecord }

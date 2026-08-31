@@ -112,3 +112,25 @@ test("invalid lifecycle transitions fail closed", () => {
     store.close();
   }
 });
+
+test("project concurrency is enforced atomically across controller connections", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-runner-capacity-"));
+  const databasePath = join(directory, "runs.sqlite");
+  const firstController = new RunStore(databasePath);
+  const secondController = new RunStore(databasePath);
+  try {
+    const first = firstController.claimWithinCapacity(request(), 1);
+    const second = secondController.claimWithinCapacity(
+      request({ taskId: "ENV-02", revision: "revision-2", workerId: "worker-b" }),
+      1,
+    );
+
+    assert.equal(first.outcome, "claimed");
+    assert.equal(second.outcome, "capacity");
+    assert.equal(firstController.activeCount("fixture/example"), 1);
+  } finally {
+    firstController.close();
+    secondController.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

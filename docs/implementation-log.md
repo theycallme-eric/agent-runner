@@ -80,3 +80,23 @@ transcripts or secrets here.
   the suite now has 18 tests.
 - Public repository target: `https://github.com/theycallme-eric/agent-runner`. No license was selected
   implicitly; public visibility and open-source licensing remain separate decisions.
+
+## 2026-08-31 — Multi-project controller and DAG planning
+
+- Corrected the work sequence after prematurely asking for a consumer project's location. Agent
+  Runner must be built and proven against repository-owned fixtures before a real project is needed.
+- Added a durable multi-project registry. Project path, enabled state, contract version, and worker
+  profile belong to controller state; worker/model choices remain absent from product contracts.
+- Removed the hard-coded GitHub restriction from the contract parser. Task-provider and dependency-
+  resolver identifiers now select controller-installed plug-ins.
+- Added deterministic DAG validation and readiness: duplicate tasks or edges, missing dependencies,
+  self-dependencies, and cycles fail closed; pending work is ready only after all prerequisites finish.
+- Added atomic per-project concurrency enforcement in the same SQLite transaction as a task claim.
+  Separate controller connections cannot over-claim the declared capacity.
+- Added `register`, `projects`, and `status` CLI flows. Registration reads a project's standard
+  contract and is idempotent without copying or rewriting the project.
+- Evidence: 30 deterministic tests pass, including two independent projects using different task
+  providers and worker profiles, registry restart persistence, repeated planning, and cross-process
+  capacity enforcement.
+- Next open decision: implement concrete GitHub task and dependency adapters, then connect a
+  repository-owned fixture task to the existing workspace/worker/verification path.
