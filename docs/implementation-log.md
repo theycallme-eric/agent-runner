@@ -300,3 +300,8 @@ transcripts or secrets here.
   two-stage resolution: temporarily leave that page unlinked, synchronize the dogfood branch, then
   restore the link and exercise a second clean base synchronization. This avoids rewriting persisted
   PR identity or weakening conflict detection.
+- Stage one live evidence: the existing run `f6e409ca-67a8-4ed3-b63a-d35295f74219` moved from base
+  `8ac806c` to `22a062d` and verified head `f29af72`. The same workspace and Fable session were
+  retained; no worker ran. `npm run check`, `npm test`, and `npm run build` passed after the merge.
+  The controller updated draft PR #8 by persisted id, reduced its task diff to
+  `docs/dogfood-runbook.md`, observed CI `none`, released its lease, and created no claim or PR.
