@@ -131,11 +131,67 @@ export class DeliveryCoordinator {
       execution.branchName,
       initial,
     );
+    const existingDelivery = this.#runs.delivery(initial.id);
+    if (
+      existingDelivery &&
+      (
+        existingDelivery.provider !== this.#publisher.name ||
+        existingDelivery.branchName !== execution.branchName ||
+        existingDelivery.baseBranch !== request.contract.project.baseBranch
+      )
+    ) {
+      return this.#terminalFailure(
+        initial,
+        "delivery-identity-drift",
+        at(),
+        { existing: existingDelivery },
+      );
+    }
+
     let pullRequest: PullRequestSnapshot;
-    try {
-      pullRequest = await this.#publisher.publishDraft(publishRequest);
-    } catch (error) {
-      return this.#retryableFailure(initial.id, "draft-publication-failed", error, at());
+    if (existingDelivery) {
+      let observed: PullRequestSnapshot | null;
+      try {
+        observed = await this.#publisher.inspectPullRequest(
+          request.project.id,
+          existingDelivery.externalId,
+        );
+      } catch (error) {
+        return this.#retryableFailure(initial.id, "draft-observation-failed", error, at());
+      }
+      if (!observed) {
+        return this.#terminalFailure(initial, "pull-request-missing", at(), existingDelivery);
+      }
+      const observationFailure = validateExistingPullRequest(existingDelivery, observed);
+      if (observationFailure) {
+        return this.#terminalFailure(initial, observationFailure, at(), {
+          existing: existingDelivery,
+          observed,
+        });
+      }
+      const identityAdvanced = existingDelivery.baseSha !== initial.baseSha ||
+        existingDelivery.headSha !== initial.headSha;
+      if (identityAdvanced && observed.headSha === existingDelivery.headSha) {
+        try {
+          pullRequest = await this.#publisher.updateDraft(publishRequest, observed);
+        } catch (error) {
+          return this.#retryableFailure(initial.id, "draft-update-failed", error, at());
+        }
+      } else if (observed.headSha === initial.headSha) {
+        pullRequest = observed;
+      } else {
+        return this.#terminalFailure(initial, "pull-request-head-changed", at(), {
+          persistedHeadSha: existingDelivery.headSha,
+          verifiedHeadSha: initial.headSha,
+          observedHeadSha: observed.headSha,
+        });
+      }
+    } else {
+      try {
+        pullRequest = await this.#publisher.publishDraft(publishRequest);
+      } catch (error) {
+        return this.#retryableFailure(initial.id, "draft-publication-failed", error, at());
+      }
     }
     try {
       validatePullRequest(publishRequest, pullRequest);
@@ -143,15 +199,12 @@ export class DeliveryCoordinator {
       return this.#terminalFailure(initial, "invalid-draft-pull-request", at(), error);
     }
 
-    const existingDelivery = this.#runs.delivery(initial.id);
     if (
       existingDelivery &&
       (
         existingDelivery.provider !== this.#publisher.name ||
         existingDelivery.externalId !== pullRequest.externalId ||
-        existingDelivery.branchName !== pullRequest.branchName ||
-        existingDelivery.baseSha !== initial.baseSha ||
-        existingDelivery.headSha !== pullRequest.headSha
+        existingDelivery.branchName !== pullRequest.branchName
       )
     ) {
       return this.#terminalFailure(
@@ -296,6 +349,7 @@ function validatePullRequest(
   if (
     pullRequest.externalId.trim() === "" ||
     pullRequest.url.trim() === "" ||
+    pullRequest.state !== "open" ||
     !pullRequest.draft ||
     pullRequest.branchName !== request.branchName ||
     pullRequest.baseBranch !== request.baseBranch ||
@@ -303,6 +357,30 @@ function validatePullRequest(
   ) {
     throw new Error("Publisher returned a pull request that does not match the verified run");
   }
+}
+
+function validateExistingPullRequest(
+  persisted: RunDeliveryRecord,
+  observed: PullRequestSnapshot,
+): string | null {
+  if (observed.state === "merged") {
+    return "pull-request-merged";
+  }
+  if (observed.state === "closed") {
+    return "pull-request-closed";
+  }
+  if (!observed.draft) {
+    return "pull-request-not-draft";
+  }
+  if (
+    observed.externalId !== persisted.externalId ||
+    observed.url !== persisted.url ||
+    observed.branchName !== persisted.branchName ||
+    observed.baseBranch !== persisted.baseBranch
+  ) {
+    return "delivery-identity-drift";
+  }
+  return null;
 }
 
 function requireRun(runs: RunStore, runId: string): RunRecord {

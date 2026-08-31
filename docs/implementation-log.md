@@ -235,3 +235,68 @@ transcripts or secrets here.
   `bypassPermissions` is rejected by schema. The local dogfood profile now selects `acceptEdits`.
 - Next open decision: verify the permission-profile correction, create a new issue revision so the
   failed immutable run is preserved, and retry DOGFOOD-01 through the same public command.
+
+## 2026-08-31 — First live draft pull request and no-check reconciliation
+
+- Advanced issue #7 deliberately so the failed, immutable first attempt remained auditable, then
+  repeated the targeted dry-run against remote base `8ac806c`. It selected only DOGFOOD-01 without a
+  claim or model call.
+- The second mutating run succeeded through the public `run-once` path. Persisted evidence: run
+  `f6e409ca-67a8-4ed3-b63a-d35295f74219`, Claude Code `2.1.251` in local headless print mode,
+  model `fable`, permission mode `acceptEdits`, Max-subscription authentication, `$5` client-side
+  budget ceiling, worker session `653d41d9-72da-4008-b0e6-acb45a0bb8e1`, local usage estimate
+  `$0.768455`, and duration 63.938 seconds.
+- The controller accepted only `README.md` and `docs/dogfood-runbook.md`, then independently passed
+  `npm run check`, `npm test`, and `npm run build`. It committed verified head `4d64ab7`, pushed one
+  runner-owned branch, and created [draft pull request #8](https://github.com/theycallme-eric/agent-runner/pull/8).
+- The initial CI observation exposed a forge-adapter edge case: `gh pr checks --required` exits 1
+  with `no checks reported` when a repository has no required checks. Publication had succeeded, but
+  the controller correctly retained the run at `pr-open` with a retryable delivery failure rather
+  than losing the pull-request identity or relaunching Fable.
+- Corrected only that exact GitHub response to an empty check set. Authentication errors and other
+  code-1 failures still fail closed. The suite now has 60 deterministic tests, including both the
+  no-check response and an unrelated command failure.
+- Replayed the same task revision. The controller made no worker call, reconciled the same branch and
+  pull request, recorded CI as `none`, and advanced the existing run to `ci` with `waiting-ci`.
+  `none` is intentionally not treated as passed; the pull request remains draft and unmerged.
+- Next open decision: human review of draft PR #8 and implementation of RECON-01 before any unattended
+  scheduler is enabled.
+
+## 2026-08-31 — Durable restart and advanced-base reconciliation
+
+- Audited the joined lifecycle against RECON-01. The existing retry path safely prevented duplicates
+  but still pushed/edited a persisted draft on every CI poll, and delivery treated an advanced base as
+  terminal. Those behaviors were safe one-shot defaults, not restart convergence.
+- Added atomic reconciliation leases separate from new-task claims. Live ownership cannot be stolen;
+  expired active work reclaims within the configured attempt budget; interrupted synchronization
+  preserves its state and consumes a bounded recovery attempt; reconciliation leases are released.
+- Split pull-request observation from creation and update. After initial persistence, provider plus
+  external id are authoritative. Pending CI is polled without another push/edit. Missing, non-draft,
+  changed-head, closed, merged, or identity-drifted pull requests fail visibly instead of being
+  replaced or silently changed back.
+- Added checkpointed advanced-base synchronization. The controller records the new base and required
+  reverification, merges it into the isolated worktree, aborts and restores on conflict, reruns every
+  required verification command with lease heartbeats, re-applies protected-path gates, and updates
+  the same draft only after the synchronized head passes.
+- `run-once` now reads one live DAG snapshot, reconciles every nonterminal project run first, then
+  claims from that same snapshot. Structured output includes lease, workspace, worker session,
+  branch, pull-request, CI, base, and failure classifications.
+- Evidence: `npm run verify` passes with 70 deterministic tests. Coverage includes real Git clean
+  synchronization and conflict restoration; live-lease refusal; expired-attempt exhaustion; missing
+  workspaces; closed/merged drafts; advanced-base reverification; same-draft update; and later CI-only
+  polling with no worker, publish, push, or edit.
+- Next open decision: publish RECON-01, exercise it against live draft PR #8, then implement AUTO-01's
+  explicitly enabled bounded multi-project loop and morning report.
+
+### Live reconciliation preflight
+
+- A read-only three-way merge preview found that main's new reconciliation link and PR #8's dogfood
+  link were independent insertions at the same README table location, which Git would report as a
+  content conflict. Running the controller knowingly would have failed the immutable dogfood run.
+- Applied the already-approved dogfood link to main as the human conflict resolution before the live
+  pass. The synchronized PR can therefore retain the substantive runbook file while the controller
+  remains forbidden from guessing through merge conflicts.
+- A second preview showed the older PR also lacked main's adjacent reconciliation link. Chose a
+  two-stage resolution: temporarily leave that page unlinked, synchronize the dogfood branch, then
+  restore the link and exercise a second clean base synchronization. This avoids rewriting persisted
+  PR identity or weakening conflict detection.

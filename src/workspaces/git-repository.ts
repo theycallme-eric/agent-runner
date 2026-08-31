@@ -10,10 +10,15 @@ export interface WorkspaceSnapshot {
   dirty: boolean;
 }
 
+export type WorkspaceSynchronization =
+  | { outcome: "synchronized"; headSha: string }
+  | { outcome: "conflict"; conflictedPaths: string[] };
+
 export interface WorkspaceRepository {
   resolveRef(repositoryPath: string, ref: string): Promise<string>;
   snapshot(workspacePath: string, baseSha: string): Promise<WorkspaceSnapshot>;
   commit(workspacePath: string, message: string): Promise<string>;
+  synchronize(workspacePath: string, baseSha: string): Promise<WorkspaceSynchronization>;
 }
 
 export class GitWorkspaceRepository implements WorkspaceRepository {
@@ -63,6 +68,44 @@ export class GitWorkspaceRepository implements WorkspaceRepository {
     }
     return gitText(this.#gitExecutable, workspacePath, ["rev-parse", "HEAD"]);
   }
+
+  async synchronize(workspacePath: string, baseSha: string): Promise<WorkspaceSynchronization> {
+    if (!/^[0-9a-f]{7,64}$/i.test(baseSha)) {
+      throw new Error(`Synchronization base is not a commit id: ${baseSha}`);
+    }
+    try {
+      await gitRaw(this.#gitExecutable, workspacePath, [
+        "-c",
+        "user.name=Agent Runner",
+        "-c",
+        "user.email=agent-runner@localhost",
+        "merge",
+        "--no-ff",
+        "--no-edit",
+        baseSha,
+      ]);
+    } catch (error) {
+      const conflictedPaths = nulList(await gitRaw(
+        this.#gitExecutable,
+        workspacePath,
+        ["diff", "--name-only", "--diff-filter=U", "-z"],
+      )).sort();
+      if (conflictedPaths.length === 0) {
+        throw error;
+      }
+      try {
+        await gitRaw(this.#gitExecutable, workspacePath, ["merge", "--abort"]);
+      } catch (abortError) {
+        throw new Error(
+          `Synchronization conflicted and merge abort failed: ${errorText(abortError)}`,
+        );
+      }
+      return { outcome: "conflict", conflictedPaths };
+    }
+    const headSha = await gitText(this.#gitExecutable, workspacePath, ["rev-parse", "HEAD"]);
+    await gitRaw(this.#gitExecutable, workspacePath, ["merge-base", "--is-ancestor", baseSha, headSha]);
+    return { outcome: "synchronized", headSha };
+  }
 }
 
 function nulList(value: string): string[] {
@@ -80,4 +123,8 @@ async function gitRaw(executable: string, cwd: string, argumentsList: string[]):
 
 async function gitText(executable: string, cwd: string, argumentsList: string[]): Promise<string> {
   return (await gitRaw(executable, cwd, argumentsList)).trim();
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

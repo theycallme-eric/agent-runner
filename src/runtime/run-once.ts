@@ -4,6 +4,10 @@ import type { PullRequestPublisherRegistry } from "../delivery/registry.js";
 import type { CommandRunner } from "../execution/command-runner.js";
 import { TaskExecutor, type TaskExecutionResult } from "../execution/task-executor.js";
 import type { ProjectPlanner } from "../planning/project-planner.js";
+import {
+  ReconciliationController,
+  type ReconciliationResult,
+} from "../reconciliation/controller.js";
 import { loadProjectContract } from "../project-contract.js";
 import type { ProjectRegistryStore } from "../projects/registry.js";
 import type { WorkerProfileRegistry } from "../workers/registry.js";
@@ -49,6 +53,7 @@ export interface RunOnceResult {
   completed: string[];
   claimed: RunOnceTaskResult[];
   reconciled: RunOnceTaskResult[];
+  reconciliation: ReconciliationResult[];
   duplicateTaskIds: string[];
   capacityReached: boolean;
   limitReached: boolean;
@@ -127,13 +132,33 @@ export class RunOnceController {
         ...graphFields(inspected.graph),
         claimed: [],
         reconciled: [],
+        reconciliation: [],
         duplicateTaskIds: [],
         capacityReached: false,
         limitReached: (request.targetTaskId ? 1 : inspected.graph.ready.length) > request.maxClaims,
       };
     }
 
-    const plan = await this.#planner.claimReady({
+    const inspected = await this.#planner.inspect(project, contract);
+    assertTargetReady(request.targetTaskId, inspected.graph.ready.map((task) => task.id));
+    const reconciliation = await new ReconciliationController(
+      this.#runs,
+      this.#workspaces,
+      this.#repository,
+      this.#workers,
+      this.#commands,
+      this.#baseRevisions,
+      publisher,
+      { now: this.#now },
+    ).reconcileProject({
+      project,
+      contract,
+      inspection: inspected,
+      currentBaseSha: baseSha,
+      controllerId: request.controllerId,
+      leaseDurationMs: request.leaseDurationMs,
+    });
+    const plan = this.#planner.claimInspected({
       project,
       contract,
       baseSha,
@@ -142,7 +167,7 @@ export class RunOnceController {
       leaseDurationMs: request.leaseDurationMs,
       maxClaims: request.maxClaims,
       ...(request.targetTaskId ? { taskIds: [request.targetTaskId] } : {}),
-    });
+    }, inspected);
     const executor = new TaskExecutor(
       this.#runs,
       this.#workspaces,
@@ -195,61 +220,37 @@ export class RunOnceController {
         failureReason: finalRun.failureReason,
       } satisfies RunOnceTaskResult;
     }));
-    const tasksById = new Map(
-      [
-        ...plan.graph.ready,
-        ...plan.graph.waiting,
-        ...plan.graph.blocked,
-        ...plan.graph.completed,
-      ].map((task) => [task.id, task]),
-    );
-    const reconciled: RunOnceTaskResult[] = publisher
-      ? await Promise.all(plan.duplicateTaskIds.map(async (taskId): Promise<RunOnceTaskResult | null> => {
-          const task = tasksById.get(taskId);
-          if (!task) {
-            throw new Error(`Duplicate task disappeared from graph: ${taskId}`);
-          }
-          const run = this.#runs.findTask(project.id, task.id, task.revision);
-          if (!run || !["verified", "pr-open", "ci"].includes(run.state)) {
-            return null;
-          }
-          const coordinator = new DeliveryCoordinator(
-            this.#runs,
-            this.#repository,
-            publisher,
-            { now: this.#now, baseRevisions: this.#baseRevisions },
-          );
-          const delivery = await coordinator.deliver({ runId: run.id, task, project, contract });
-          const finalRun = this.#runs.get(run.id) ?? run;
-          const execution = this.#runs.execution(run.id);
-          const persistedDelivery = this.#runs.delivery(run.id);
-          return {
-            taskId: task.id,
-            runId: run.id,
-            state: finalRun.state,
-            execution: "not-run",
-            worker: execution?.workerName
-              ? {
-                  name: execution.workerName,
-                  model: execution.workerModel,
-                  status: execution.workerStatus ?? "unknown",
-                }
-              : null,
-            workspacePath: execution?.workspacePath ?? null,
-            delivery: delivery.outcome,
-            pullRequestUrl: persistedDelivery?.url ?? null,
-            ciStatus: persistedDelivery?.ciStatus ?? null,
-            failureReason: finalRun.failureReason,
-          };
-        })).then((results) => results.filter(isPresent))
-      : [];
+    const reconciled = reconciliation.map((item): RunOnceTaskResult => {
+      const execution = this.#runs.execution(item.runId);
+      return {
+        taskId: item.taskId,
+        runId: item.runId,
+        state: item.state,
+        execution: item.execution,
+        worker: execution?.workerName
+          ? {
+              name: execution.workerName,
+              model: execution.workerModel,
+              status: execution.workerStatus ?? "unknown",
+            }
+          : null,
+        workspacePath: execution?.workspacePath ?? null,
+        delivery: reconciliationDelivery(item.outcome),
+        pullRequestUrl: item.pullRequestUrl,
+        ciStatus: item.ciStatus,
+        failureReason: item.failureReason,
+      };
+    });
     const taskSucceeded = (task: RunOnceTaskResult): boolean =>
       task.failureReason === null &&
       task.execution !== "failed" &&
       task.execution !== "lease-lost" &&
       task.delivery !== "failed" &&
       task.delivery !== "retryable-failure";
-    const ok = claimed.every(taskSucceeded) && reconciled.every(taskSucceeded);
+    const reconciliationSucceeded = reconciliation.every(
+      (item) => !["failed", "retryable-failure"].includes(item.outcome),
+    );
+    const ok = claimed.every(taskSucceeded) && reconciled.every(taskSucceeded) && reconciliationSucceeded;
     return {
       ok,
       dryRun: false,
@@ -263,6 +264,7 @@ export class RunOnceController {
       ...graphFields(plan.graph),
       claimed,
       reconciled,
+      reconciliation,
       duplicateTaskIds: plan.duplicateTaskIds,
       capacityReached: plan.capacityReached,
       limitReached: plan.limitReached,
@@ -270,8 +272,12 @@ export class RunOnceController {
   }
 }
 
-function isPresent<T>(value: T | null): value is T {
-  return value !== null;
+function reconciliationDelivery(
+  outcome: ReconciliationResult["outcome"],
+): DeliveryResult["outcome"] | null {
+  return ["waiting-ci", "completed", "failed", "waiting-human", "retryable-failure"].includes(outcome)
+    ? outcome as DeliveryResult["outcome"]
+    : null;
 }
 
 function graphFields(graph: {

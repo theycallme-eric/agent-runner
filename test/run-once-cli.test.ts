@@ -98,7 +98,7 @@ profiles:
     assert.equal(repeated.reconciled[0]?.ciStatus, "passed");
     const log = readFileSync(callLog, "utf8");
     assert.equal((log.match(/^pr-create$/gm) ?? []).length, 1);
-    assert.equal((log.match(/^pr-edit$/gm) ?? []).length, 2);
+    assert.equal((log.match(/^pr-edit$/gm) ?? []).length, 1);
     assert.equal((log.match(/^pr-checks$/gm) ?? []).length, 2);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -190,6 +190,17 @@ if (args[0] === "api") {
     ]]));
   } else if (endpoint.endsWith("/dependencies/blocked_by")) {
     process.stdout.write("[[]]");
+  } else if (endpoint === "repos/fixture/run-once/pulls/7") {
+    const pull = JSON.parse(fs.readFileSync(state, "utf8"))[0];
+    process.stdout.write(JSON.stringify({
+      number: pull.number,
+      html_url: pull.url,
+      draft: pull.isDraft,
+      state: "open",
+      merged_at: null,
+      head: { ref: pull.headRefName, sha: pull.headRefOid },
+      base: { ref: pull.baseRefName, sha: "base-fixture" }
+    }));
   } else {
     process.stderr.write("unexpected API endpoint: " + endpoint);
     process.exit(2);

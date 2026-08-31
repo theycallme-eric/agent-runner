@@ -134,3 +134,47 @@ test("project concurrency is enforced atomically across controller connections",
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("reconciliation leases cannot steal live ownership and can be released", () => {
+  const store = new RunStore();
+  try {
+    const claim = store.claim(request());
+    let run = store.transition(claim.run.id, "workspace-ready", 1_010);
+    run = store.transition(run.id, "running", 1_011);
+    run = store.transition(run.id, "verifying", 1_012, { headSha: "head-a" });
+    store.transition(run.id, "verified", 1_013, { headSha: "head-a" });
+
+    const live = store.acquireLease(run.id, "worker-b", 1_050, 100);
+    const acquired = store.acquireLease(run.id, "worker-b", 1_101, 100);
+    assert.equal(live.outcome, "live");
+    assert.equal(acquired.outcome, "acquired");
+    assert.equal(acquired.run?.leaseOwner, "worker-b");
+    assert.equal(store.releaseLease(run.id, "worker-b", 1_102), true);
+    assert.equal(store.get(run.id)?.leaseOwner, null);
+  } finally {
+    store.close();
+  }
+});
+
+test("an interrupted synchronization resumes in place within the attempt budget", () => {
+  const store = new RunStore();
+  try {
+    const claim = store.claim(request());
+    let run = store.transition(claim.run.id, "workspace-ready", 1_010);
+    run = store.transition(run.id, "running", 1_011);
+    run = store.transition(run.id, "verifying", 1_012, { headSha: "head-a" });
+    run = store.transition(run.id, "verified", 1_013, { headSha: "head-a" });
+    run = store.transition(run.id, "synchronized", 1_014, {
+      baseSha: "base-b",
+      requiresReverification: true,
+    });
+
+    const resumed = store.resumeExpired(run.id, "worker-b", 1_101, 100);
+    assert.equal(resumed.outcome, "reclaimed");
+    assert.equal(resumed.run?.state, "synchronized");
+    assert.equal(resumed.run?.attempt, 2);
+    assert.equal(resumed.run?.baseSha, "base-b");
+  } finally {
+    store.close();
+  }
+});

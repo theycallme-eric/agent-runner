@@ -87,6 +87,10 @@ export type ReclaimResult =
   | { outcome: "failed"; run: RunRecord }
   | { outcome: "not-stale" | "missing"; run: RunRecord | null };
 
+export type LeaseAcquisitionResult =
+  | { outcome: "acquired"; run: RunRecord }
+  | { outcome: "live" | "missing" | "terminal"; run: RunRecord | null };
+
 export interface WorkerResult {
   reportedSuccess: boolean;
   headSha: string | null;
