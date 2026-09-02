@@ -6,28 +6,33 @@
 Approved external task graph
              ↓ task-provider boundary
 Standalone Agent Runner
-  registry + durable state + leases + policy + reconciliation + reporting
-             ↕ versioned project contract
+  external project contract + registry + durable state + leases + policy + reconciliation
+             ↕ isolated Git worktrees
 Product repository
-  requirements/tasks + dependency source + verification + gates + agent instructions
+  product source and its own native development instructions
              ↕ worker adapter
 Claude/Fable | Codex | OpenHands | future ACP-compatible workers
 ```
 
 The controller never owns raw design inputs, requirements authorship, or product source code. It
 does not import or invoke Requirements Builder. The product never vendors the controller. The
-current implementation still reads one project contract; moving that configuration entirely into
-controller-owned state is an open boundary correction.
+versioned project contract lives in `project-workspaces/<slug>/runner/project.yml`, outside the
+product repository.
 
-## Minimal project injection
+## No project injection
 
 ```text
-.agent-runner.yml   # task source, setup, verification, protected paths, concurrency, delivery policy
-AGENTS.md           # existing instructions plus a short Agent Runner pointer
-CLAUDE.md           # optional thin import for Claude Code
+project-workspaces/<slug>/runner/
+  project.yml       # task source, setup, verification, gates, concurrency, delivery policy
+  state/            # controller database and durable state
+  workspaces/       # isolated task worktrees
+  reports/          # owner-facing run reports
+
+/independent/product/repository/
+  product files only; no Agent Runner requirement or pointer
 ```
 
-Example contract:
+Example external contract:
 
 ```yaml
 version: 1
@@ -59,16 +64,18 @@ delivery:
 ```
 
 Worker/model selection belongs to controller or user configuration rather than the project contract.
-Secrets never belong in the contract.
+Secrets never belong in the contract. Registration requires separate explicit repository and
+contract paths, rejects a contract inside the repository, verifies the Git root, and checks that a
+GitHub-backed contract names the repository configured as `origin`.
 
 The lifecycle core depends only on the normalized `WorkerAdapter` contract. Native adapters may use
 provider-specific features; the versioned JSON process adapter provides a universal wrapper path for
 other CLIs and SDKs. See [Worker adapters](worker-adapters.md).
 
-Project locations, enabled state, and worker-profile selection live in the controller's persistent
-registry. Task sources and dependency sources are separately named plug-ins. The planner normalizes
-their output, validates the DAG, and atomically claims ready revisions within each project's
-concurrency limit. See [Project onboarding](project-onboarding.md).
+Canonical repository and contract locations, enabled state, and worker-profile selection live in the
+controller's persistent registry. Task sources and dependency sources are separately named plug-ins.
+The planner normalizes their output, validates the DAG, and atomically claims ready revisions within
+each project's concurrency limit. See [Project onboarding](project-onboarding.md).
 
 ## Durable lifecycle
 
@@ -144,5 +151,5 @@ requires both a turn limit and a wall-clock timeout. A production project may op
 `project` source so `CLAUDE.md` is visible; user and local settings are never inherited implicitly.
 
 The first concrete task/dependency pair is GitHub Issues plus native issue dependencies. It is a
-plug-in registration, not special behavior in the planner. Agent Runner's own checked-in contract is
-the repository-owned dogfood fixture and selects only issues labeled `agent:task`.
+plug-in registration, not special behavior in the planner. Agent Runner's own external dogfood
+contract selects only issues labeled `agent:task`.

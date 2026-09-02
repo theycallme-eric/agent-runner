@@ -16,6 +16,8 @@ test("run-once joins GitHub discovery, isolated execution, verification, and dra
   const directory = mkdtempSync(join(tmpdir(), "agent-runner-run-once-"));
   const remote = join(directory, "remote.git");
   const project = join(directory, "project");
+  const runner = join(directory, "project-workspace", "runner");
+  const contract = join(runner, "project.yml");
   const state = join(directory, "state.sqlite");
   const workspaces = join(directory, "workspaces");
   const gh = join(directory, "fake-gh");
@@ -25,17 +27,28 @@ test("run-once joins GitHub discovery, isolated execution, verification, and dra
   const callLog = join(directory, "calls.log");
   const cli = resolve("dist/src/cli.js");
   mkdirSync(project);
+  mkdirSync(runner, { recursive: true });
 
   try {
     git(directory, ["init", "--bare", remote]);
     git(project, ["init", "--initial-branch=main"]);
     git(project, ["config", "user.name", "Fixture"]);
     git(project, ["config", "user.email", "fixture@example.invalid"]);
-    writeFileSync(join(project, ".agent-runner.yml"), projectContract());
+    writeFileSync(contract, projectContract());
     writeFileSync(join(project, "README.md"), "run-once fixture\n");
-    git(project, ["add", ".agent-runner.yml", "README.md"]);
+    git(project, ["add", "README.md"]);
     git(project, ["commit", "-m", "Fixture base"]);
-    git(project, ["remote", "add", "origin", remote]);
+    git(project, [
+      "config",
+      `url.file://${remote}.insteadOf`,
+      "https://github.com/fixture/run-once.git",
+    ]);
+    git(project, [
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/fixture/run-once.git",
+    ]);
     git(project, ["push", "-u", "origin", "main"]);
 
     writeFileSync(worker, fakeWorkerScript());
@@ -50,7 +63,16 @@ profiles:
     executable: ${worker}
 `);
 
-    cliJson(cli, ["register", project, "--worker", "fixture-worker", "--state", state]);
+    cliJson(cli, [
+      "register",
+      project,
+      "--contract",
+      contract,
+      "--worker",
+      "fixture-worker",
+      "--state",
+      state,
+    ]);
     const environment = { ...process.env, AGENT_RUNNER_GH_BIN: gh };
     const common = [
       "fixture/run-once",
@@ -77,6 +99,11 @@ profiles:
     assert.deepEqual(dryRun.claimed, []);
     assert.equal(dryRun.limitReached, false);
     assert.equal(readFileIfExists(callLog), "");
+    assert.equal(git(project, ["status", "--porcelain=v1"]), "");
+    assert.throws(
+      () => readFileSync(join(project, ".agent-runner.yml"), "utf8"),
+      /ENOENT/,
+    );
 
     const executed = cliJson(cli, ["run-once", ...common], environment) as RunOnceOutput;
     assert.equal(executed.ok, true);

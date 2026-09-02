@@ -9,7 +9,7 @@ appended by the controller operator after each run, not asserted here in advance
 
 - The target issue is labeled `agent:task`, has no unresolved `blocked by` relationships, and its
   scope is small enough for one bounded worker session.
-- The repository is registered in controller state and its checked-in `.agent-runner.yml` validates.
+- The repository is registered in controller state and its external `runner/project.yml` validates.
 - A controller-owned, non-secret worker profile exists in the local profile config. The profile — not
   the project contract — selects the agent, model, and permission mode, so the worker remains
   replaceable without touching the repository.

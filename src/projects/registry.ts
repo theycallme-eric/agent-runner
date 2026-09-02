@@ -138,8 +138,8 @@ function validateRegistration(request: RegisterProjectRequest): void {
     throw new Error("Project root and contract paths must be absolute");
   }
   const contractRelative = relative(request.rootPath, request.contractPath);
-  if (contractRelative.startsWith("..") || isAbsolute(contractRelative)) {
-    throw new Error("Project contract must be inside the project root");
+  if (!contractRelative.startsWith("..") && !isAbsolute(contractRelative)) {
+    throw new Error("Project contract must be outside the product root");
   }
   validatePluginId(request.workerProfile, "workerProfile");
   if (!Number.isInteger(request.contractVersion) || request.contractVersion < 1) {

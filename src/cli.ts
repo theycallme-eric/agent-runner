@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -42,7 +42,7 @@ async function validateCommand(argumentsList: string[]): Promise<void> {
     usage();
     return;
   }
-  const contractPath = await resolveContractPath(input);
+  const contractPath = resolve(input);
   const contract = await loadProjectContract(contractPath);
   print({
     valid: true,
@@ -55,8 +55,9 @@ async function validateCommand(argumentsList: string[]): Promise<void> {
 
 async function registerCommand(argumentsList: string[]): Promise<void> {
   const rootPath = argumentsList[0];
+  const contractPath = option(argumentsList, "--contract");
   const workerProfile = option(argumentsList, "--worker");
-  if (!rootPath || !workerProfile) {
+  if (!rootPath || !contractPath || !workerProfile) {
     usage();
     return;
   }
@@ -70,12 +71,16 @@ async function registerCommand(argumentsList: string[]): Promise<void> {
   try {
     const result = await onboardProject(registry, {
       rootPath,
+      contractPath,
       workerProfile,
       now: Date.now(),
+      gitExecutable: process.env.AGENT_RUNNER_GIT_BIN ?? "git",
     });
     print({
       created: result.created,
       project: result.project.id,
+      repositoryPath: result.project.rootPath,
+      contractPath: result.project.contractPath,
       workerProfile: result.project.workerProfile,
       enabled: result.project.enabled,
     });
@@ -94,6 +99,7 @@ async function projectsCommand(argumentsList: string[]): Promise<void> {
       projects: registry.list().map((project) => ({
         id: project.id,
         rootPath: project.rootPath,
+        contractPath: project.contractPath,
         workerProfile: project.workerProfile,
         enabled: project.enabled,
         contractVersion: project.contractVersion,
@@ -354,15 +360,6 @@ async function autopilotCommand(argumentsList: string[]): Promise<void> {
   }
 }
 
-async function resolveContractPath(input: string): Promise<string> {
-  const path = resolve(input);
-  try {
-    return (await stat(path)).isDirectory() ? join(path, ".agent-runner.yml") : path;
-  } catch {
-    return path;
-  }
-}
-
 function statePathFrom(argumentsList: string[]): string {
   const explicit = option(argumentsList, "--state");
   if (explicit) {
@@ -409,8 +406,9 @@ function print(value: unknown): void {
 
 function usage(): void {
   console.error(`Usage:
-  agent-runner validate <project-or-contract>
-  agent-runner register <project-root> --worker <profile> [--state <database>]
+  agent-runner validate <external-project-contract>
+  agent-runner register <product-repository> --contract <external-project-contract>
+    --worker <profile> [--state <database>]
   agent-runner projects [--state <database>]
   agent-runner status [--state <database>]
   agent-runner ready <project-id> [--state <database>]

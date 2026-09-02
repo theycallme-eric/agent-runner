@@ -11,7 +11,7 @@ import { analyzeTaskGraph } from "../src/tasks/graph.js";
 const project: ProjectRegistration = {
   id: "example/repo",
   rootPath: "/projects/example/repo",
-  contractPath: "/projects/example/repo/.agent-runner.yml",
+  contractPath: "/controller/example-repo/project.yml",
   workerProfile: "any-worker",
   enabled: true,
   contractVersion: 1,

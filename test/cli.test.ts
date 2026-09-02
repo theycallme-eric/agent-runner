@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -8,12 +15,27 @@ import test from "node:test";
 test("registers and lists a fixture project through the public CLI", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-runner-cli-"));
   const project = join(directory, "project");
+  const runner = join(directory, "project-workspace", "runner");
+  const contract = join(runner, "project.yml");
+  const canonicalDirectory = realpathSync(directory);
+  const canonicalProject = join(canonicalDirectory, "project");
+  const canonicalContract = join(canonicalDirectory, "project-workspace", "runner", "project.yml");
   const state = join(directory, "state", "controller.sqlite");
   const cli = resolve("dist/src/cli.js");
   const gh = join(directory, "fake-gh");
   const workerConfig = join(directory, "workers.yml");
   try {
-    mkdirSync(project);
+    mkdirSync(project, { recursive: true });
+    mkdirSync(runner, { recursive: true });
+    execFileSync("git", ["-C", project, "init", "--initial-branch=main"]);
+    execFileSync("git", [
+      "-C",
+      project,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/fixture/cli.git",
+    ]);
     writeFileSync(
       gh,
       `#!/usr/bin/env node
@@ -44,7 +66,7 @@ if (endpoint === "repos/fixture/cli/issues") {
     );
     chmodSync(gh, 0o755);
     writeFileSync(
-      join(project, ".agent-runner.yml"),
+      contract,
       `version: 1
 project: { id: fixture/cli, baseBranch: main }
 tasks: { provider: github, dependencies: github-native }
@@ -70,10 +92,26 @@ profiles:
     );
 
     const registered = JSON.parse(
-      execFileSync(process.execPath, [cli, "register", project, "--worker", "fixture-worker", "--state", state], {
+      execFileSync(process.execPath, [
+        cli,
+        "register",
+        project,
+        "--contract",
+        contract,
+        "--worker",
+        "fixture-worker",
+        "--state",
+        state,
+      ], {
         encoding: "utf8",
       }),
-    ) as { created: boolean; project: string; workerProfile: string };
+    ) as {
+      created: boolean;
+      project: string;
+      repositoryPath: string;
+      contractPath: string;
+      workerProfile: string;
+    };
     const status = JSON.parse(
       execFileSync(process.execPath, [cli, "status", "--state", state], { encoding: "utf8" }),
     ) as { projects: Array<{ id: string; workerProfile: string }> };
@@ -98,13 +136,16 @@ profiles:
     assert.deepEqual(registered, {
       created: true,
       project: "fixture/cli",
+      repositoryPath: canonicalProject,
+      contractPath: canonicalContract,
       workerProfile: "fixture-worker",
       enabled: true,
     });
     assert.deepEqual(status.projects, [
       {
         id: "fixture/cli",
-        rootPath: project,
+        rootPath: canonicalProject,
+        contractPath: canonicalContract,
         workerProfile: "fixture-worker",
         enabled: true,
         contractVersion: 1,

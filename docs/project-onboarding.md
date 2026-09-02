@@ -1,21 +1,25 @@
 # Project onboarding and planning
 
-Agent Runner is built without access to any consumer project. Repository-owned fixtures prove the
+Agent Runner is built without access to any consumer project. Synthetic tool fixtures prove the
 contract first; real project locations are supplied only when an owner chooses to register them.
 
 ## Ownership boundary
 
 The product repository owns:
 
-- `.agent-runner.yml`
-- requirements and tasks
-- dependency truth
-- setup and verification commands
-- protected paths and delivery policy
+- product source and product-native development instructions
+- its Git history, branches, and remotes
+- no Agent Runner installation, contract, pointer, or required support file
 
-Controller state owns:
+The external project workspace owns:
 
-- the absolute project and contract locations
+- `runner/project.yml`, including task/dependency providers, setup and verification commands,
+  protected paths, concurrency, attempts, timeouts, and delivery policy
+- controller database, isolated worktrees, and reports
+
+Controller registration owns:
+
+- the canonical product-repository and external-contract locations
 - whether the project is enabled
 - the selected worker profile, such as `claude-fable` or `codex-default`
 - runs, leases, attempts, evidence, and lifecycle events
@@ -25,13 +29,21 @@ Worker and model selection therefore changes without editing the product reposit
 ## Registration
 
 ```text
-agent-runner register /path/to/project --worker <profile>
+agent-runner register /path/to/product-repository \
+  --contract /path/to/project-workspace/runner/project.yml \
+  --worker <profile>
 ```
 
-Registration reads `/path/to/project/.agent-runner.yml`, validates it, and creates an idempotent
-registry record. Reusing the same project id or root with different settings fails visibly instead
-of silently redirecting work. The default controller database is
-`~/.local/state/agent-runner/state.sqlite`; `--state` and `AGENT_RUNNER_STATE_PATH` override it.
+Registration requires both locations explicitly, resolves symlinks, validates the contract, verifies
+that the product path is the Git working-tree root, and creates an idempotent registry record. It
+rejects a contract inside the product repository. For GitHub-backed task or delivery adapters, it
+also reads the configured `origin` URL locally and requires it to match `project.id`; registration
+does not make a network call or change the repository.
+
+Reusing the same project id or root with different settings fails visibly instead of silently
+redirecting work. The default controller database is
+`~/.local/state/agent-runner/state.sqlite`; a project-support workspace should pass a path under
+its external `runner/state/` directory with `--state` or `AGENT_RUNNER_STATE_PATH`.
 
 ## Task and dependency plug-ins
 
@@ -70,6 +82,7 @@ and retry limit. Claims are unique by project, task id, and task revision. Per-p
 checked in the same SQLite transaction as the claim, so separate controller processes cannot exceed
 the declared worker capacity.
 
-Registration, profile listing, readiness, and `run-once --dry-run` do not launch a coding agent.
-Mutating execution begins only at explicit `run-once`, which consumes claims through the normalized
-worker interface and can publish drafts through the separately selected delivery adapter.
+Registration, project status, profile listing, readiness, and `run-once --dry-run` do not modify the
+product or launch a coding agent. Mutating execution begins only at explicit `run-once`, which
+consumes claims through the normalized worker interface and can publish drafts through the
+separately selected delivery adapter.

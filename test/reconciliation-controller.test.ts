@@ -30,7 +30,7 @@ delivery: { provider: fixture, pullRequest: true, merge: never }
 const project: ProjectRegistration = {
   id: "fixture/reconciliation",
   rootPath: "/fixture/repository",
-  contractPath: "/fixture/repository/.agent-runner.yml",
+  contractPath: "/controller/reconciliation/project.yml",
   workerProfile: "fixture-worker",
   enabled: true,
   contractVersion: 1,

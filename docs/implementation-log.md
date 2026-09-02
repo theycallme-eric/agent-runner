@@ -424,3 +424,31 @@ transcripts or secrets here.
   source cannot survive as misleading generated output.
 - Next gate: verify Agent Runner's reduced suite, then externalize its remaining in-project contract
   before connecting a product repository.
+
+## 2026-09-02 — Remove product-repository configuration
+
+- Replaced implicit `<product>/.agent-runner.yml` registration with two required explicit inputs:
+  the independent product Git repository and the controller-owned
+  `project-workspaces/<slug>/runner/project.yml` contract.
+- Canonicalized both locations, rejected contracts inside the product repository, verified the
+  supplied path is the Git working-tree root, and checked GitHub-backed project identity against the
+  locally configured `origin` before creating registry state.
+- Kept registration read-only with respect to the product. Status now shows both canonical paths so
+  the owner can verify the attachment.
+- Moved the executable fixture contract to a neutral tool fixture name and changed the joined
+  run-once proof so only product files enter the synthetic repository; its contract stays in an
+  external project workspace.
+- Added rejection coverage for product-injected contracts and mismatched GitHub remotes. The full
+  deterministic suite now passes 75 tests.
+- Updated the project-setup skill to record `runner/project.yml` as the external contract location
+  without inventing its contents. New local/GitHub repository creation remains a separate explicit
+  onboarding capability rather than an implied registration side effect.
+- Applied that same boundary to Agent Runner's live dogfood registration: moved its tracked contract
+  and ignored SQLite controller state into
+  `project-workspaces/agent-runner/runner/`, updated exactly one registered contract path, and
+  removed the legacy copies from the code repository. A pre-change database backup remains under the
+  support-tooling backup folder.
+- Moved both clean historical dogfood worktrees from the legacy top-level workspace folder into the
+  registered project's external `runner/workspaces/` directory with Git worktree metadata intact,
+  then transactionally updated exactly their two persisted workspace paths. Historical event text
+  remains immutable. A second pre-move database backup was retained.

@@ -186,7 +186,7 @@ function projectsFixture(): ProjectRegistryStore {
   projects.register({
     id: "fixture/one",
     rootPath: "/fixture/one",
-    contractPath: "/fixture/one/.agent-runner.yml",
+    contractPath: "/controller/one/project.yml",
     workerProfile: "worker-a",
     contractVersion: 1,
     now: 1,
@@ -194,7 +194,7 @@ function projectsFixture(): ProjectRegistryStore {
   projects.register({
     id: "fixture/two",
     rootPath: "/fixture/two",
-    contractPath: "/fixture/two/.agent-runner.yml",
+    contractPath: "/controller/two/project.yml",
     workerProfile: "worker-b",
     contractVersion: 1,
     now: 1,

@@ -4,21 +4,23 @@ Local, project-agnostic control plane for running an approved dependency graph t
 coding agents and verified draft pull requests.
 
 These tools live outside product repositories. Product repositories such as CLEAR remain independent;
-the target boundary requires no Agent Runner package, service, or checked-in configuration. The
-current runner registration path still expects an in-project `.agent-runner.yml`; that mismatch is
-known and must be replaced by controller-owned configuration before connecting a product repository.
+the boundary requires no Agent Runner package, service, instructions, or checked-in configuration.
+Each project's Runner contract lives in its external support workspace.
 
 ## Current state
 
-The first local reliability slice is executable. It validates a project's `.agent-runner.yml`,
-registers multiple projects and controller-owned worker profiles durably, resolves ready work through
-pluggable task and dependency adapters, and enforces task uniqueness and per-project concurrency in
-SQLite. It also simulates controller-owned verification, base synchronization, CI, retries, and human
-gates. The concrete execution service now connects a claim to an exact-base worktree, a selected
-worker adapter, independent commands, a locally committed verified head, and durable evidence. Real
-work can now be launched explicitly with bounded `run-once`. Each mutating pass reconciles durable
-runs before claiming new work: it respects live leases, reclaims expired attempts, observes existing
-drafts by persisted identity, synchronizes advanced bases, and reruns required verification.
+The first local reliability slice is executable. It validates an external project contract,
+registers multiple independent product repositories and controller-owned worker profiles durably,
+resolves ready work through pluggable task and dependency adapters, and enforces task uniqueness and
+per-project concurrency in SQLite. Registration canonicalizes both paths, rejects a contract inside
+the product, verifies the Git working-tree root, and checks GitHub-backed project identity against
+the repository's origin without changing the repository. The controller also simulates
+controller-owned verification, base synchronization, CI, retries, and human gates. The concrete
+execution service connects a claim to an exact-base worktree, a selected worker adapter, independent
+commands, a locally committed verified head, and durable evidence. Real work can be launched
+explicitly with bounded `run-once`. Each mutating pass reconciles durable runs before claiming new
+work: it respects live leases, reclaims expired attempts, observes existing drafts by persisted
+identity, synchronizes advanced bases, and reruns required verification.
 A bounded scheduler and morning report are available behind an explicit `autopilot --enable` gate.
 The first version enforces global concurrency one and nothing runs in the background unless that
 command is deliberately launched. A short supervised autopilot proof reconciled the existing
@@ -66,8 +68,10 @@ and workers remain replaceable.
 
 ```text
 npm run build
-node dist/src/cli.js validate fixtures/project
-node dist/src/cli.js register /path/to/project --worker claude-fable
+node dist/src/cli.js validate /path/to/project-workspace/runner/project.yml
+node dist/src/cli.js register /path/to/product-repo \
+  --contract /path/to/project-workspace/runner/project.yml \
+  --worker claude-fable
 node dist/src/cli.js status
 node dist/src/cli.js ready <project-id>
 node dist/src/cli.js profiles --profiles /path/to/workers.yml
@@ -75,10 +79,12 @@ node dist/src/cli.js run-once <project-id> --dry-run --profiles /path/to/workers
 node dist/src/cli.js autopilot --enable --minutes 480 --max-new-claims 3
 ```
 
-`register` reads the standard contract and stores the project location plus worker-profile selection
-in controller state. It does not copy the project, rewrite its requirements, or put agent/model
-selection in the product repository. Use `--state <path>` or `AGENT_RUNNER_STATE_PATH` to select a
-different controller database.
+`register` requires the product repository and external contract as separate explicit paths. It
+stores their canonical locations plus worker-profile selection in controller state. It fails when
+the contract is inside the product, the path is not the Git root, or a GitHub-backed contract does
+not match the GitHub origin. It does not copy the project, rewrite its requirements, or put
+agent/model selection in the product repository. Use `--state <path>` or
+`AGENT_RUNNER_STATE_PATH` to select a different controller database.
 
 The built-in GitHub adapter reads issues and GitHub's native `blocked by` relationships. `ready` is
 read-only: it refreshes and validates the DAG but does not claim work or launch an agent.
@@ -100,7 +106,7 @@ worker/quota, or failure boundaries. See [the autopilot contract](docs/autopilot
 ## Coding-agent support
 
 The controller depends only on the `WorkerAdapter` interface. Agent- and model-specific settings do
-not appear in `.agent-runner.yml` or the lifecycle core.
+not appear in the external project contract or the lifecycle core.
 
 - `ClaudeCodeWorker` is the first native adapter; CLEAR will initially select Fable through it.
 - `JsonProcessWorker` runs any local CLI or SDK wrapper that implements the versioned JSON protocol.
@@ -139,6 +145,5 @@ should not receive Agent Runner code or required configuration files.
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License and public packaging are deferred; neither is required for the local workflow.
-- Next implementation gate: replace the remaining in-project contract requirement with
-  controller-owned project configuration, then accept published approved tasks through the existing
-  task-provider boundary.
+- Next implementation gate: add explicit new-repository creation to external project setup, then
+  accept only published, owner-approved tasks through the existing task-provider boundary.

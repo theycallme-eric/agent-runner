@@ -15,8 +15,8 @@ interface WorkerAdapter {
 ```
 
 Model names, authentication, tools, turn limits, and provider-specific settings belong to an adapter
-or controller installation. They are not project requirements and do not appear in
-`.agent-runner.yml`.
+or controller installation. They are not product-repository requirements and do not appear in the
+external per-project contract.
 
 The controller registry maps a project to a named worker profile. `WorkerProfileRegistry` resolves
 that profile to a configured adapter at execution time, so the claim and lifecycle code never needs

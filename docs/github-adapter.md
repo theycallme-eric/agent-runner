@@ -50,12 +50,12 @@ completed task ids. It does not claim or execute work.
 
 ## Live dogfood evidence
 
-Agent Runner's checked-in contract selects its own `agent:task` issues. The first repository-owned
+Agent Runner's external dogfood contract selects its own `agent:task` issues. The first GitHub
 graph contains [RUN-01](https://github.com/theycallme-eric/agent-runner/issues/1) and dependent
 [DELIVERY-01](https://github.com/theycallme-eric/agent-runner/issues/2). A live `ready` refresh on
 2026-08-31 returned RUN-01 as ready, DELIVERY-01 as waiting, and exactly one dependency edge. The
-controller registration database used for this check is local and ignored; the portable contract
-and visible task graph are committed or stored on GitHub.
+controller registration database and project contract used for this check now live in the external
+project-support workspace; the visible task graph remains on GitHub.
 
 ## Sources
 

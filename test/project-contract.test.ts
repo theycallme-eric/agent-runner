@@ -5,7 +5,7 @@ import test from "node:test";
 
 import { parseProjectContract } from "../src/project-contract.js";
 
-const fixture = readFileSync(resolve("fixtures/project/.agent-runner.yml"), "utf8");
+const fixture = readFileSync(resolve("fixtures/project/project.yml"), "utf8");
 
 test("accepts the fixture project contract", () => {
   const contract = parseProjectContract(fixture);

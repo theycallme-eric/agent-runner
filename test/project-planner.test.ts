@@ -27,7 +27,7 @@ function registration(id: string, workerProfile: string): ProjectRegistration {
   return {
     id,
     rootPath: `/projects/${id}`,
-    contractPath: `/projects/${id}/.agent-runner.yml`,
+    contractPath: `/controller/${id}/project.yml`,
     workerProfile,
     enabled: true,
     contractVersion: 1,

@@ -195,15 +195,17 @@ async function createContext(
 ): Promise<FixtureContext> {
   const directory = mkdtempSync(join(tmpdir(), "agent-runner-execution-"));
   const repository = join(directory, "repository");
-  const contractPath = join(repository, ".agent-runner.yml");
+  const runner = join(directory, "runner");
+  const contractPath = join(runner, "project.yml");
   mkdirSync(repository);
+  mkdirSync(runner);
   git(repository, ["init", "--initial-branch=main"]);
   git(repository, ["config", "user.name", "Fixture"]);
   git(repository, ["config", "user.email", "fixture@example.invalid"]);
   const source = contractSource(verification, protectedPaths);
   writeFileSync(join(repository, "README.md"), "fixture\n");
   writeFileSync(contractPath, source);
-  git(repository, ["add", "README.md", ".agent-runner.yml"]);
+  git(repository, ["add", "README.md"]);
   git(repository, ["commit", "-m", "Fixture base"]);
   const baseSha = git(repository, ["rev-parse", "HEAD"]);
   const contract = parseProjectContract(source);

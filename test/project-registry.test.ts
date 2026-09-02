@@ -14,7 +14,7 @@ test("persists multiple projects and controller-owned worker profiles across res
     const alpha = first.register({
       id: "example/alpha",
       rootPath: join(directory, "alpha"),
-      contractPath: join(directory, "alpha", ".agent-runner.yml"),
+      contractPath: join(directory, "runner-alpha", "project.yml"),
       workerProfile: "claude-fable",
       contractVersion: 1,
       now: 1_000,
@@ -22,7 +22,7 @@ test("persists multiple projects and controller-owned worker profiles across res
     const beta = first.register({
       id: "example/beta",
       rootPath: join(directory, "beta"),
-      contractPath: join(directory, "beta", ".agent-runner.yml"),
+      contractPath: join(directory, "runner-beta", "project.yml"),
       workerProfile: "codex-default",
       contractVersion: 1,
       now: 1_001,
@@ -55,7 +55,7 @@ test("registration is idempotent but rejects identity drift", () => {
   const request = {
     id: "example/alpha",
     rootPath: "/projects/alpha",
-    contractPath: "/projects/alpha/.agent-runner.yml",
+    contractPath: "/controller/alpha/project.yml",
     workerProfile: "claude-fable",
     contractVersion: 1,
     now: 1_000,
@@ -74,6 +74,15 @@ test("registration is idempotent but rejects identity drift", () => {
           id: "example/other",
         }),
       /Project root is already registered/,
+    );
+    assert.throws(
+      () => registry.register({
+        ...request,
+        id: "example/injected",
+        rootPath: "/projects/injected",
+        contractPath: "/projects/injected/.agent-runner.yml",
+      }),
+      /outside the product root/,
     );
   } finally {
     registry.close();
