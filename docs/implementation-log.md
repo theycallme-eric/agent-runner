@@ -371,3 +371,28 @@ transcripts or secrets here.
   still be observed on GitHub after publication. No license was selected implicitly.
 - Next gate: choose the public license, observe the first automated check, then build the installable
   local runtime and its `init` and `doctor` commands before the portability proof.
+
+## 2026-09-02 — Requirements Builder first vertical slice
+
+- The owner corrected the product direction: this is a local project-support workflow, not a formal
+  standalone product rollout. Requirements Builder and Agent Runner must live outside product
+  repositories. Public licensing, service packaging, and in-project initialization are deferred.
+- Added the separate `requirements-builder` command while reusing the existing model-neutral worker
+  profile boundary. It accepts repeated file, directory, and ZIP inputs and works entirely in a new
+  external output workspace.
+- Added source copying, generated-folder filtering, ZIP path checks, symbolic-link rejection, bounded
+  intake, a hashed source manifest, and a post-worker check that the copied evidence did not change.
+- Added a strict requirements schema with sourced acceptance criteria, explicit open questions,
+  requirement-to-task coverage, concrete verification, and task dependencies. Independent validation
+  rejects unknown references, missing coverage, duplicate edges, and cycles; blocking questions keep
+  a plan from being publishable.
+- Added readable requirements/DAG previews and self-contained GitHub issue drafts. Each issue draft
+  carries its full requirement context and stable task marker rather than depending on a hidden
+  requirements file.
+- Evidence: 82 deterministic tests pass, including the public Requirements Builder command through a
+  generic JSON worker, successful and unsafe ZIP cases, copied-source immutability, blocking product
+  questions, missing dependencies, and dependency cycles. No live model call or GitHub publication
+  was made.
+- Next gate: run the builder once against the owner's real design archive with an explicitly approved
+  worker profile, review the artifacts, then implement idempotent issue/dependency publication and
+  remove the runner's mandatory in-project contract.

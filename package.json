@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "bin": {
-    "agent-runner": "dist/src/cli.js"
+    "agent-runner": "dist/src/cli.js",
+    "requirements-builder": "dist/src/requirements/cli.js"
   },
   "description": "Project-agnostic controller and reliability simulator for coding-agent work.",
   "engines": {
