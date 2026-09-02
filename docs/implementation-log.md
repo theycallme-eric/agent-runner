@@ -348,3 +348,26 @@ transcripts or secrets here.
   durations, combined local usage estimate, draft PR #8 with CI `none`, and issue #7 as remaining.
 - No model, duplicate branch/PR, merge, or background schedule was launched. The next gate is
   repeatable service/container packaging followed by a second small-project portability proof.
+
+## 2026-09-02 — Dogfood proof closure and automated verification
+
+- Re-read the live repository state before acting. GitHub reported draft PR #8 open, cleanly
+  mergeable, without required checks, and limited to `docs/dogfood-runbook.md`; issue #7 remained
+  open.
+- A parallel local verification attempt ran the full suite in both checkouts simultaneously. Both
+  copies exceeded the fake worker profile's one-second timeout in the same test. Running that test
+  and the complete suite normally and serially passed, identifying resource contention in the
+  diagnostic rather than a branch-specific failure.
+- After owner approval, marked PR #8 ready and squash-merged it as commit `5d2afa7`. Closed issue #7
+  explicitly with the verification evidence because the pull-request body did not contain an
+  automatic issue-closing keyword.
+- Reconciled README, architecture, and landscape status language with the completed supervised
+  scheduler proof. Added GitHub Actions verification for pull requests and pushes to `main`, using
+  Node.js 24, `npm ci`, and `npm run verify`.
+- An initial local workflow-shape assertion treated the valid empty `pull_request:` trigger as a
+  missing value after YAML parsing. Corrected the diagnostic to check for the trigger key; the
+  workflow parses with the intended push, pull-request, and verification structure.
+- Evidence: the serial verification suite passes all 74 tests on merged `main`. The CI workflow must
+  still be observed on GitHub after publication. No license was selected implicitly.
+- Next gate: choose the public license, observe the first automated check, then build the installable
+  local runtime and its `init` and `doctor` commands before the portability proof.

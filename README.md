@@ -19,7 +19,10 @@ runs before claiming new work: it respects live leases, reclaims expired attempt
 drafts by persisted identity, synchronizes advanced bases, and reruns required verification.
 A bounded scheduler and morning report are available behind an explicit `autopilot --enable` gate.
 The first version enforces global concurrency one and nothing runs in the background unless that
-command is deliberately launched. A real unattended run has not yet been started.
+command is deliberately launched. A short supervised autopilot proof reconciled the existing
+dogfood run without launching another worker or creating another claim. A real unattended task run
+has not yet been started. GitHub Actions runs the deterministic verification suite for pull requests
+and pushes to `main`.
 
 ## Start here
 

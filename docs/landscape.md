@@ -52,8 +52,9 @@ durable controller. Treat it as a reference unless this project deliberately ado
 The local spike now contains the multi-project registry, versioned contract, normalized provider and
 dependency interfaces, DAG validation, atomic claims, leases, heartbeats, and per-project concurrency.
 The first concrete forge adapters read GitHub issues/native dependencies and reconcile draft pull
-requests/required CI. Other forges, remote-base synchronization, the public run loop, and unattended
-reconciliation remain open.
+requests/required CI. Remote-base synchronization, restart reconciliation, the public one-shot path,
+and a bounded multi-project scheduler are implemented. Repeatable service packaging, a second-project
+portability proof, requirements-to-DAG compilation, and support for other forges remain open.
 
 ## Research sources
 

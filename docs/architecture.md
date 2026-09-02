@@ -119,8 +119,9 @@ successful isolated Fable session and persisted draft pull request. Restart reco
 classifies durable identities before new claims, synchronizes advanced bases inside the isolated
 worktree, reruns required verification, and observes existing drafts without routine republishing.
 The bounded multi-project scheduler now reuses this joined path with explicit limits and a morning
-report. The remaining gates before CLEAR are a supervised live scheduler run and repeatable local
-service/container packaging.
+report. A supervised live scheduler pass reconciled the existing dogfood run without a new claim,
+worker invocation, branch, or pull request. The remaining gates before CLEAR are repeatable local
+service packaging and a second-project portability proof.
 
 `run-once` is the first joined public surface. It refreshes `origin/<base>` before claiming and uses
 read-only `ls-remote` checks during execution/delivery, avoiding the stale-local-branch assumption.
