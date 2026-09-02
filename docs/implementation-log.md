@@ -396,3 +396,17 @@ transcripts or secrets here.
 - Next gate: run the builder once against the owner's real design archive with an explicitly approved
   worker profile, review the artifacts, then implement idempotent issue/dependency publication and
   remove the runner's mandatory in-project contract.
+
+## 2026-09-02 — Move project-support tooling outside CLEAR
+
+- Moved Agent Runner, its isolated workspaces, and the project-support setup skill out of the CLEAR
+  parent folder and into `/Users/eric/Documents/Projects/support-tooling`.
+- Repaired the Git worktree metadata for the historical failed attempt and successful dogfood proof,
+  preserving their branches and clean working state at the new paths.
+- Backed up the local controller database before migration, then updated its live project, contract,
+  and execution-workspace paths. Historical event details retain their original paths as immutable
+  run evidence rather than being rewritten.
+- Confirmed the former support-tool locations no longer exist under `/Users/eric/clear-app`; the CLEAR
+  product repository was not modified or moved.
+- Evidence: the focused worker-profile test passes, and the complete migrated verification suite
+  passes all 82 tests from the new Agent Runner location.
