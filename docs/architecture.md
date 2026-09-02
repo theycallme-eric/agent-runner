@@ -1,8 +1,10 @@
-# Architecture spike
+# Agent Runner architecture
 
 ## Boundary
 
 ```text
+Approved external task graph
+             ↓ task-provider boundary
 Standalone Agent Runner
   registry + durable state + leases + policy + reconciliation + reporting
              ↕ versioned project contract
@@ -12,9 +14,10 @@ Product repository
 Claude/Fable | Codex | OpenHands | future ACP-compatible workers
 ```
 
-The controller never owns product requirements or source code. The project never vendors the
-controller. Installation adds one editable contract and a short pointer from the project's agent
-instructions.
+The controller never owns raw design inputs, requirements authorship, or product source code. It
+does not import or invoke Requirements Builder. The product never vendors the controller. The
+current implementation still reads one project contract; moving that configuration entirely into
+controller-owned state is an open boundary correction.
 
 ## Minimal project injection
 

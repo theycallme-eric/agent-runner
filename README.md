@@ -1,7 +1,7 @@
 # Agent Runner
 
-Local project-support tools for turning design inputs into approved, dependency-aware requirements
-and then running that work through isolated coding agents and verified pull requests.
+Local, project-agnostic control plane for running an approved dependency graph through isolated
+coding agents and verified draft pull requests.
 
 These tools live outside product repositories. Product repositories such as CLEAR remain independent;
 the target boundary requires no Agent Runner package, service, or checked-in configuration. The
@@ -26,17 +26,14 @@ dogfood run without launching another worker or creating another claim. A real u
 has not yet been started. GitHub Actions runs the deterministic verification suite for pull requests
 and pushes to `main`.
 
-The first Requirements Builder slice is also executable. It copies files, folders, or ZIP archives
-into a separate workspace, asks a configured model-neutral worker to produce a strict requirements
-plan, rejects invalid coverage or dependency graphs, and emits a human-readable preview plus
-GitHub-issue drafts. It does not edit a product repository or publish issues.
+Requirements preparation is an upstream responsibility. Agent Runner does not ingest raw designs,
+generate requirements, or invoke Requirements Builder. It begins only with an approved task source.
 
 ## Start here
 
 | Document | Purpose |
 |---|---|
 | [Architecture](docs/architecture.md) | System boundary, project contract, and first executable slice |
-| [Requirements Builder](docs/requirements-builder.md) | Design intake, requirements validation, DAG preview, and current limits |
 | [Project onboarding](docs/project-onboarding.md) | Multi-project registry and task/DAG plug-in boundary |
 | [GitHub adapter](docs/github-adapter.md) | Issue selection, native dependencies, and normalization rules |
 | [Worker adapters](docs/worker-adapters.md) | Agent-neutral protocol and provider adapter boundary |
@@ -58,22 +55,6 @@ npm install
 npm run validate:fixture
 npm run verify
 ```
-
-Build a requirements packet in an external workspace:
-
-```text
-npm run build
-node dist/src/requirements/cli.js build \
-  --source /path/to/design.zip \
-  --source /path/to/prototype \
-  --output /path/to/requirements-workspace \
-  --worker claude-fable \
-  --profiles /path/to/workers.yml
-```
-
-The output includes the strict plan, a readable review document, source hashes, worker evidence, and
-self-contained issue drafts with dependency identifiers. Nothing is published until a later,
-explicit approval step.
 
 The suite currently proves that duplicate claims are rejected, expired attempts are bounded, live
 leases cannot be stolen, controller restarts preserve state, false worker success is rejected,
@@ -137,26 +118,27 @@ states that this dollar estimate is not a bill. It remains useful as a usage gua
 ## Target experience
 
 ```text
-requirements-builder build --source /path/to/design.zip --output /path/to/workspace
-requirements-builder preview /path/to/workspace/requirements-plan.json
-agent-runner register /path/to/project --config /path/to/external-project-profile.yml
-agent-runner autopilot --enable
+approved task graph
+  → agent-runner ready <project-id>
+  → agent-runner run-once <project-id> --dry-run
+  → explicit run-once or autopilot --enable
+  → isolated workers, independent verification, and draft pull requests
 ```
 
-The requirements stage produces a reviewable task graph. After approval, those tasks become the
-Agent Runner's input. The runner claims ready work, creates isolated workspaces, launches configured
-coding agents, verifies their output independently, and publishes reviewable pull requests.
-Automatic merging is not part of the first version.
+The runner claims ready work, creates isolated workspaces, launches configured coding agents,
+verifies their output independently, and publishes reviewable pull requests. Automatic merging is
+not part of the first version.
 
 ## Relationship to CLEAR
 
-CLEAR is the first intended product, not part of this repository. Its design and requirements can be
-processed from this local support workspace, and the runner can build it through external profiles
-and isolated worktrees. CLEAR should not receive Agent Runner code or required configuration files.
+CLEAR is an intended consumer, not part of this repository. Its requirements are prepared and
+approved upstream. The runner can build it through external profiles and isolated worktrees. CLEAR
+should not receive Agent Runner code or required configuration files.
 
 ## Repository status
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License and public packaging are deferred; neither is required for the local workflow.
-- Next decision gate: run Requirements Builder against a real design archive, review its output, then
-  add the approved issue-publication bridge and externalize the runner's project configuration.
+- Next implementation gate: replace the remaining in-project contract requirement with
+  controller-owned project configuration, then accept published approved tasks through the existing
+  task-provider boundary.

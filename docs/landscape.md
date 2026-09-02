@@ -49,12 +49,13 @@ durable controller. Treat it as a reference unless this project deliberately ado
 - Risk-tiered human gates and merge policy
 - Crash reconciliation, retry/no-progress budgets, audit events, and morning reports
 
-The local spike now contains the multi-project registry, versioned contract, normalized provider and
+The Agent Runner contains the multi-project registry, versioned contract, normalized provider and
 dependency interfaces, DAG validation, atomic claims, leases, heartbeats, and per-project concurrency.
 The first concrete forge adapters read GitHub issues/native dependencies and reconcile draft pull
 requests/required CI. Remote-base synchronization, restart reconciliation, the public one-shot path,
-and a bounded multi-project scheduler are implemented. Repeatable service packaging, a second-project
-portability proof, requirements-to-DAG compilation, and support for other forges remain open.
+and a bounded multi-project scheduler are implemented. Requirements-to-DAG compilation now belongs
+to the separate upstream Requirements Builder. External controller-owned project configuration,
+repeatable local operation, safe broader parallelism, and support for other forges remain open.
 
 ## Research sources
 

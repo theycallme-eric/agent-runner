@@ -410,3 +410,17 @@ transcripts or secrets here.
   product repository was not modified or moved.
 - Evidence: the focused worker-profile test passes, and the complete migrated verification suite
   passes all 82 tests from the new Agent Runner location.
+
+## 2026-09-02 — Separate Requirements Builder from Agent Runner
+
+- Moved Requirements Builder into a standalone sibling tool under the project-support root after its
+  independent 14-test verification suite passed.
+- Removed the requirements CLI, schema, intake, rendering, tests, documentation, and package binary
+  from Agent Runner. Agent Runner now begins only at its approved external task-provider boundary.
+- Updated current documentation to state that Agent Runner does not ingest raw designs, author
+  requirements, or invoke the separate builder.
+- The first post-split verification exposed stale compiled Requirements Builder tests because the
+  TypeScript build did not clear `dist/`. Added a clean-before-build step to both tools so removed
+  source cannot survive as misleading generated output.
+- Next gate: verify Agent Runner's reduced suite, then externalize its remaining in-project contract
+  before connecting a product repository.
