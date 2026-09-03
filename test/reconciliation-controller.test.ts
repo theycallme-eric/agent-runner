@@ -249,6 +249,7 @@ test("recovers an exact auto-merged pull request and completes its source task",
     mergeVerified: async () => {
       completionCalls += 1;
       return {
+        outcome: "merged" as const,
         pullRequest: merged,
         taskCompleted: true,
         evidence: ["merged head recovered", "source task completed"],

@@ -170,7 +170,8 @@ test("automatically merges the exact verified head and completes its source task
   publisher.mergeVerified = async (_request, pullRequest) => {
     mergeCalls += 1;
     return {
-      pullRequest: { ...pullRequest, draft: false, state: "merged" },
+      outcome: "merged" as const,
+      pullRequest: { ...pullRequest, draft: false, state: "merged" as const },
       taskCompleted: true,
       evidence: ["exact verified head merged", "source task completed"],
     };
@@ -303,6 +304,7 @@ test("a bounded CI wait expires without failing or transitioning the run", async
   publisher.observeRequiredChecks = async (request) =>
     publisher.checkCi(request, pullRequest(request, "observed"));
   publisher.mergeVerified = async (_request, observed) => ({
+    outcome: "merged" as const,
     pullRequest: { ...observed, draft: false, state: "merged" as const },
     taskCompleted: true,
     evidence: ["exact verified head merged"],
@@ -332,6 +334,143 @@ test("a bounded CI wait expires without failing or transitioning the run", async
     assert.equal(completed.outcome, "completed");
     assert.equal(completed.ciWaitExpired, false);
     assert.equal(context.runs.ciWait(context.runId), null);
+  } finally {
+    context.runs.close();
+  }
+});
+
+test("a pass read before the pull request became ready cannot complete the run", async () => {
+  // The observation never changes: the older pass from before the ready transition is still the
+  // latest run for the required context. The run must not complete on the readying pass, and must
+  // not complete on the first reading after it either.
+  const context = setup();
+  context.request.contract = automaticMergeContract;
+  let observations = 0;
+  const publisher = fakePublisher(
+    async (request) => pullRequest(request, "108"),
+    async () => {
+      observations += 1;
+      return { status: "passed", evidence: ["node-tests: pass"], checks: [nodeTests("pass")] };
+    },
+  );
+  publisher.validateAutomaticMerge = async () => ({
+    evidence: ["strict protected branch"],
+    requiredChecks: [{ context: "node-tests", appId: NODE_TESTS_APP }],
+  });
+  publisher.observeRequiredChecks = async (request) =>
+    publisher.checkCi(request, pullRequest(request, "observed"));
+  let mergeCalls = 0;
+  publisher.mergeVerified = async (_request, observed) => {
+    mergeCalls += 1;
+    return mergeCalls === 1
+      ? {
+          outcome: "waiting" as const,
+          pullRequest: { ...observed, draft: false },
+          reason: "The pull request was marked ready for review during this pass",
+          evidence: ["marked ready for review"],
+        }
+      : {
+          outcome: "merged" as const,
+          pullRequest: { ...observed, draft: false, state: "merged" as const },
+          taskCompleted: true,
+          evidence: ["exact verified head merged"],
+        };
+  };
+  const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
+    now: tickingClock(),
+  });
+
+  try {
+    const readied = await coordinator.deliver(context.request);
+    const firstPostReady = await coordinator.deliver(context.request);
+    const merged = await coordinator.deliver(context.request);
+
+    assert.equal(readied.outcome, "waiting-ci");
+    assert.equal(readied.run.state, "ci");
+    assert.equal(readied.ciWaitExpired, false);
+    assert.match(readied.message ?? "", /ready for review/);
+    assert.equal(context.runs.delivery(context.runId)?.draft, false);
+
+    assert.equal(firstPostReady.outcome, "waiting-ci");
+    assert.match(firstPostReady.message ?? "", /may not have registered yet/);
+    assert.equal(
+      context.runs.events(context.runId).filter((event) =>
+        event.type === "automatic-merge-settling"
+      ).length,
+      1,
+      "the first reading after ready must be discarded rather than merged",
+    );
+
+    assert.equal(merged.outcome, "completed");
+    assert.equal(mergeCalls, 2);
+    assert.equal(observations, 3);
+    assert.equal(
+      context.runs.events(context.runId).filter((event) =>
+        event.type === "automatic-merge-deferred"
+      ).length,
+      1,
+    );
+    assert.equal(context.runs.ciWait(context.runId), null);
+  } finally {
+    context.runs.close();
+  }
+});
+
+test("a check triggered by the ready transition keeps the run waiting until it passes", async () => {
+  const context = setup();
+  context.request.contract = automaticMergeContract;
+  const readings: CiSnapshot[] = [
+    { status: "passed", evidence: ["stale pass"], checks: [nodeTests("pass")] },
+    { status: "pending", evidence: ["ready-triggered run queued"], checks: [nodeTests("pending")] },
+    { status: "passed", evidence: ["ready-triggered run passed"], checks: [nodeTests("pass")] },
+  ];
+  const publisher = fakePublisher(async (request) => pullRequest(request, "109"), async () => {
+    const next = readings.shift() ?? {
+      status: "passed" as const,
+      evidence: ["ready-triggered run passed"],
+      checks: [nodeTests("pass")],
+    };
+    return next;
+  });
+  publisher.validateAutomaticMerge = async () => ({
+    evidence: ["strict protected branch"],
+    requiredChecks: [{ context: "node-tests", appId: NODE_TESTS_APP }],
+  });
+  publisher.observeRequiredChecks = async (request) =>
+    publisher.checkCi(request, pullRequest(request, "observed"));
+  let mergeCalls = 0;
+  publisher.mergeVerified = async (_request, observed) => {
+    mergeCalls += 1;
+    return mergeCalls === 1
+      ? {
+          outcome: "waiting" as const,
+          pullRequest: { ...observed, draft: false },
+          reason: "The pull request was marked ready for review during this pass",
+          evidence: ["marked ready for review"],
+        }
+      : {
+          outcome: "merged" as const,
+          pullRequest: { ...observed, draft: false, state: "merged" as const },
+          taskCompleted: true,
+          evidence: ["exact verified head merged"],
+        };
+  };
+  const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
+    now: tickingClock(),
+  });
+
+  try {
+    const readied = await coordinator.deliver(context.request);
+    const queued = await coordinator.deliver(context.request);
+    const mergeCallsBeforeThePass = mergeCalls;
+    const passed = await coordinator.deliver(context.request);
+
+    assert.equal(readied.outcome, "waiting-ci");
+    assert.equal(queued.outcome, "waiting-ci");
+    assert.match(queued.message ?? "", /node-tests \(pending\)/);
+    assert.equal(mergeCallsBeforeThePass, 1, "a queued required check must not reach the merge");
+    assert.equal(passed.outcome, "completed");
+    assert.equal(mergeCalls, 2);
   } finally {
     context.runs.close();
   }

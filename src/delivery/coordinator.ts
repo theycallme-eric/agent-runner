@@ -8,6 +8,7 @@ import type { WorkspaceRepository } from "../workspaces/git-repository.js";
 import type { BaseRevisionProvider } from "../workspaces/base-revision.js";
 import { reconcileRequiredChecks } from "./required-checks.js";
 import type {
+  AutomaticMergeResult,
   DraftPullRequestRequest,
   PullRequestPublisher,
   PullRequestSnapshot,
@@ -15,6 +16,18 @@ import type {
 } from "./types.js";
 
 export const DEFAULT_MAX_CI_WAIT_MINUTES = 30;
+
+/**
+ * Post-ready observations discarded before an automatic merge is allowed.
+ *
+ * Marking a draft ready can trigger a `ready_for_review` workflow, and GitHub does not guarantee
+ * that such a run has registered when the ready request returns or when the next reading is taken.
+ * Head-exact matching already closes the equivalent window for a new commit, because a commit with
+ * no registered run carries no passing result to mistake. Only the ready transition can leave a
+ * genuine same-head pass in place while a new run is still being created, so the merge waits for a
+ * later pass rather than trusting the first reading after that transition.
+ */
+export const READY_SETTLE_OBSERVATIONS = 1;
 
 export interface DeliverTaskRequest {
   runId: string;
@@ -317,6 +330,25 @@ export class DeliveryCoordinator {
     if (run.state === "pr-open") {
       run = this.#runs.transition(run.id, "ci", at());
     }
+    const waitingResult = (message: string, unsatisfied: string[]): DeliveryResult => {
+      const wait = this.#runs.recordCiWait(run.id, pullRequest.headSha, at());
+      const boundMs = ciWaitBoundMs(request);
+      const ciWaitExpired = at() - wait.firstPendingAt > boundMs;
+      this.#runs.recordEvidence(run.id, "ci-wait-observed", {
+        headSha: wait.headSha,
+        firstPendingAt: wait.firstPendingAt,
+        boundMs,
+        expired: ciWaitExpired,
+        unsatisfied,
+      }, at());
+      return {
+        outcome: "waiting-ci",
+        run,
+        delivery: this.#runs.delivery(run.id) ?? delivery,
+        message,
+        ciWaitExpired,
+      };
+    };
     if (downgraded || failedContexts.length > 0) {
       this.#runs.recordEvidence(run.id, "required-checks-incomplete", {
         requiredChecks,
@@ -342,12 +374,52 @@ export class DeliveryCoordinator {
         if (!this.#publisher.mergeVerified) {
           return this.#terminalFailure(run, "automatic-merge-unsupported", at());
         }
+        const events = this.#runs.events(run.id);
+        const readiedAt = events.find((event) =>
+          event.type === "automatic-merge-deferred"
+        )?.at;
+        if (readiedAt !== undefined) {
+          // The reading taken in this pass has already been recorded, so a count of one means this
+          // is the first observation after the ready transition.
+          const sinceReady = events.filter((event) =>
+            event.type === "ci-observed" && event.at > readiedAt
+          ).length;
+          if (sinceReady <= READY_SETTLE_OBSERVATIONS) {
+            const reason = "The first required-check reading after the pull request became ready " +
+              "is not accepted, because a ready_for_review workflow may not have registered yet";
+            this.#runs.recordEvidence(run.id, "automatic-merge-settling", {
+              reason,
+              observationsSinceReady: sinceReady,
+              settleObservations: READY_SETTLE_OBSERVATIONS,
+            }, at());
+            return waitingResult(reason, waitingContexts);
+          }
+        }
         let merged;
         try {
           merged = await this.#publisher.mergeVerified(publishRequest, pullRequest);
           validateAutomaticMerge(publishRequest, merged);
         } catch (error) {
           return this.#retryableFailure(run.id, "automatic-merge-failed", error, at());
+        }
+        if (merged.outcome === "waiting") {
+          this.#runs.recordEvidence(run.id, "automatic-merge-deferred", {
+            pullRequest: merged.pullRequest,
+            reason: merged.reason,
+            evidence: merged.evidence,
+          }, at());
+          this.#runs.recordDelivery(run.id, {
+            provider: this.#publisher.name,
+            externalId: merged.pullRequest.externalId,
+            url: merged.pullRequest.url,
+            branchName: merged.pullRequest.branchName,
+            baseBranch: merged.pullRequest.baseBranch,
+            baseSha: initial.baseSha,
+            headSha: merged.pullRequest.headSha,
+            draft: merged.pullRequest.draft,
+            ciStatus: "pending",
+          }, at());
+          return waitingResult(merged.reason, waitingContexts);
         }
         this.#runs.recordEvidence(run.id, "automatic-merge-completed", {
           pullRequest: merged.pullRequest,
@@ -376,27 +448,14 @@ export class DeliveryCoordinator {
         ciWaitExpired: false,
       };
     }
-    const wait = this.#runs.recordCiWait(run.id, pullRequest.headSha, at());
-    const boundMs = ciWaitBoundMs(request);
-    const ciWaitExpired = at() - wait.firstPendingAt > boundMs;
-    this.#runs.recordEvidence(run.id, "ci-wait-observed", {
-      headSha: wait.headSha,
-      firstPendingAt: wait.firstPendingAt,
-      boundMs,
-      expired: ciWaitExpired,
-      unsatisfied: waitingContexts,
-    }, at());
-    return {
-      outcome: "waiting-ci",
-      run,
-      delivery,
-      message: waitingContexts.length > 0
+    return waitingResult(
+      waitingContexts.length > 0
         ? `Required checks are not complete: ${waitingContexts.join(", ")}`
         : ci.status === "none"
           ? "No CI result is available"
           : "CI is still pending",
-      ciWaitExpired,
-    };
+      waitingContexts,
+    );
   }
 
   #retryableFailure(runId: string, reason: string, error: unknown, now: number): DeliveryResult {
@@ -538,12 +597,20 @@ function validateExistingPullRequest(
 
 function validateAutomaticMerge(
   request: DraftPullRequestRequest,
-  result: {
-    pullRequest: PullRequestSnapshot;
-    taskCompleted: boolean;
-    evidence: string[];
-  },
+  result: AutomaticMergeResult,
 ): void {
+  if (result.outcome === "waiting") {
+    if (
+      result.pullRequest.externalId.trim() === "" ||
+      result.pullRequest.branchName !== request.branchName ||
+      result.pullRequest.baseBranch !== request.baseBranch ||
+      result.pullRequest.headSha !== request.headSha ||
+      result.reason.trim() === ""
+    ) {
+      throw new Error("Publisher deferred the merge without a matching pull request and reason");
+    }
+    return;
+  }
   if (
     result.pullRequest.state !== "merged" ||
     result.pullRequest.draft ||

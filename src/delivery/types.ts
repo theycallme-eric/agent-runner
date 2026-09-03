@@ -53,11 +53,24 @@ export interface AutomaticMergeValidation {
   requiredChecks: RequiredCheck[];
 }
 
-export interface AutomaticMergeResult {
-  pullRequest: PullRequestSnapshot;
-  taskCompleted: boolean;
-  evidence: string[];
-}
+export type AutomaticMergeResult =
+  | {
+      outcome: "merged";
+      pullRequest: PullRequestSnapshot;
+      taskCompleted: boolean;
+      evidence: string[];
+    }
+  | {
+      /**
+       * The adapter deliberately stopped short of merging and the run stays deliverable. Used for
+       * the pass that marks a draft ready, so a check result observed before that transition can
+       * never authorize the merge.
+       */
+      outcome: "waiting";
+      pullRequest: PullRequestSnapshot;
+      reason: string;
+      evidence: string[];
+    };
 
 export interface PullRequestPublisher {
   readonly name: string;

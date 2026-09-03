@@ -334,7 +334,20 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
         if (ready.state !== "open" || ready.draft) {
           throw new Error(`Pull request ${ready.externalId} did not become merge-ready`);
         }
-        observed = ready;
+        return {
+          outcome: "waiting",
+          pullRequest: ready,
+          reason:
+            "The pull request was marked ready for review during this pass. GitHub does not " +
+            "guarantee that a ready_for_review workflow has registered when that request " +
+            "returns, so required checks are re-observed on a later pass and no result read " +
+            "before the transition can authorize the merge.",
+          evidence: [
+            ...evidence,
+            `Marked pull request ${ready.externalId} ready for review at verified head ` +
+              request.headSha,
+          ],
+        };
       }
       const observed_checks = await this.#observeRequired(request, validation.requiredChecks);
       const unsatisfied = observed_checks.unproven;
@@ -372,6 +385,7 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
 
     const taskCompleted = await this.#completeIssue(request.repository, request.sourceId);
     return {
+      outcome: "merged",
       pullRequest: observed,
       taskCompleted,
       evidence: [
