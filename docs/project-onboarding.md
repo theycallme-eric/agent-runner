@@ -55,6 +55,7 @@ tasks:
   dependencies: github-native
   config:
     includeLabels: [agent:task]
+    approvedHandoff: ../requirements/APPROVED_HANDOFF.json
 ```
 
 Delivery selects its own plug-in so task discovery and pull-request hosting are not coupled:
@@ -74,6 +75,11 @@ it without interpreting GitHub labels or another provider's selection language.
 Before a task can be claimed, the planner rejects duplicate ids, missing dependencies, duplicate
 edges, self-dependencies, and cycles. A pending task is ready only when every dependency is complete.
 Ready tasks are ordered deterministically by id.
+
+For a Requirements Builder project, `approvedHandoff` is required by the workflow even though the
+generic GitHub adapter retains its legacy label-only mode for separately managed task sources. The
+handoff, active pointer, and approval record stay in the external project workspace. None may be
+placed in the product repository.
 
 ## Multi-project isolation
 

@@ -123,6 +123,32 @@ test("required verification runs outside the worker and rejects its changes", as
   }
 });
 
+test("approved task-specific verification also runs outside the worker", async () => {
+  const context = await createContext(successWorker(async (workspacePath) => {
+    await mkdir(join(workspacePath, "src"), { recursive: true });
+    await writeFile(join(workspacePath, "src", "result.txt"), "done\n");
+  }));
+  context.request.claimed.task.verificationExpectations = [
+    "test \"$(cat src/result.txt)\" = a-different-approved-result",
+  ];
+  try {
+    const result = await context.executor.execute(context.request);
+
+    assert.equal(result.outcome, "failed");
+    assert.equal(result.run.failureReason, "task-verification-failed");
+    const taskVerification = context.runs.events(result.run.id).find((event) => {
+      if (event.type !== "command-finished" || typeof event.detail !== "object" || !event.detail) {
+        return false;
+      }
+      return (event.detail as { phase?: string }).phase === "task-verification";
+    });
+    assert.ok(taskVerification);
+    assert.equal((taskVerification.detail as { passed: boolean }).passed, false);
+  } finally {
+    context.close();
+  }
+});
+
 test("verified protected-path changes stop at a human gate", async () => {
   const context = await createContext(
     successWorker(async (workspacePath) => {

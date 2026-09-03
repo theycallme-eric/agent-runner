@@ -469,3 +469,19 @@ transcripts or secrets here.
   registered project's external `runner/workspaces/` directory with Git worktree metadata intact,
   then transactionally updated exactly their two persisted workspace paths. Historical event text
   remains immutable. A second pre-move database backup was retained.
+
+## 2026-09-02 — Enforce the approved Requirements Builder handoff
+
+- Added independent parsing and hash verification for `APPROVED_HANDOFF.json` version 1, its active
+  external approval pointer, and immutable approval record. All remain outside the product repo.
+- GitHub discovery now selects the exact approved task/issue set, preserves Requirements Builder
+  task IDs, and verifies repository/base branch, issue database identity, title, body, labels, and
+  source/requirement metadata before planning.
+- Native dependency resolution maps issue numbers back to stable task IDs and rejects any edge that
+  differs from the approved handoff. Review-only, inactive, modified, unknown-version, injected, or
+  drifted handoffs fail before claims.
+- Approved task-specific verification commands now run independently after the coding worker and
+  before the full project-wide verification suite. Both layers rerun after base synchronization.
+- Added deterministic handoff, drift, injection, and task-verification tests. The Agent Runner suite
+  now has 81 passing tests, and the root verifier passes a synthetic handoff from Requirements
+  Builder's producer through Agent Runner's consumer without a runtime dependency between tools.

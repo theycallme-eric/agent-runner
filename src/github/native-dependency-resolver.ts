@@ -3,6 +3,7 @@ import type { ProjectContract } from "../project-contract.js";
 import type { ProjectRegistration } from "../projects/types.js";
 import type { GitHubClient } from "./types.js";
 import { taskId } from "./issue-task-provider.js";
+import { loadApprovedHandoff } from "./approved-handoff.js";
 
 export class GitHubNativeDependencyResolver implements DependencyResolver {
   readonly name = "github-native";
@@ -17,8 +18,13 @@ export class GitHubNativeDependencyResolver implements DependencyResolver {
     this.#concurrency = concurrency;
   }
 
-  async resolve(tasks: TaskNode[], project: ProjectRegistration, _contract: ProjectContract) {
+  async resolve(tasks: TaskNode[], project: ProjectRegistration, contract: ProjectContract) {
     const known = new Set(tasks.map((task) => task.id));
+    const taskByIssueNumber = new Map(tasks.map((task) => [Number(task.sourceId), task.id]));
+    const handoff = await loadApprovedHandoff(project, contract);
+    const approvedDependencies = new Map(
+      handoff?.tasks.map((task) => [task.taskId, [...task.dependencies].sort()]) ?? [],
+    );
     return mapWithConcurrency(tasks, this.#concurrency, async (task) => {
       const issueNumber = Number(task.sourceId);
       if (!Number.isInteger(issueNumber) || issueNumber < 1) {
@@ -31,13 +37,21 @@ export class GitHubNativeDependencyResolver implements DependencyResolver {
             `GitHub task ${task.id} has unsupported cross-repository dependency ${dependency.repository}#${dependency.number}`,
           );
         }
-        const dependencyId = taskId(dependency.number);
+        const dependencyId = taskByIssueNumber.get(dependency.number) ?? taskId(dependency.number);
         if (!known.has(dependencyId)) {
           throw new Error(`GitHub task ${task.id} depends on undiscovered ${dependencyId}`);
         }
         return dependencyId;
       });
-      return { ...task, dependencies };
+      const actual = [...dependencies].sort();
+      const expected = approvedDependencies.get(task.id);
+      if (
+        expected !== undefined &&
+        (expected.length !== actual.length || expected.some((id, index) => id !== actual[index]))
+      ) {
+        throw new Error(`GitHub native dependencies for ${task.id} drifted from the approved handoff`);
+      }
+      return { ...task, dependencies: actual };
     });
   }
 }

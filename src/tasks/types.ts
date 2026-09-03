@@ -11,6 +11,10 @@ export interface TaskNode {
   prompt: string;
   status: TaskStatus;
   dependencies: string[];
+  requirementIds?: string[];
+  sourceRefs?: string[];
+  acceptanceCriteria?: string[];
+  verificationExpectations?: string[];
 }
 
 export interface TaskProvider {

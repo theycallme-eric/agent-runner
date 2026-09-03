@@ -242,6 +242,27 @@ export class TaskExecutor {
       }
 
       this.#runs.transition(request.claimed.run.id, "verifying", at());
+      const taskVerificationPassed = await this.#runCommands(
+        request.claimed.run.id,
+        "task-verification",
+        taskVerificationCommands(request.claimed.task, request.contract.verification.required),
+        workspace.path,
+        timeoutMs,
+        request.controllerId,
+        request.leaseDurationMs,
+        keepLease,
+        at,
+      );
+      if (!taskVerificationPassed) {
+        return this.#failure(
+          request.claimed.run.id,
+          "task-verification-failed",
+          "An approved task-specific verification command failed",
+          at(),
+          workspace,
+          workerOutcome,
+        );
+      }
       const verificationPassed = await this.#runCommands(
         request.claimed.run.id,
         "verification",
@@ -359,7 +380,7 @@ export class TaskExecutor {
 
   async #runCommands(
     runId: string,
-    phase: "setup" | "verification",
+    phase: "setup" | "task-verification" | "verification",
     commands: readonly string[],
     workspacePath: string,
     timeoutMs: number,
@@ -500,8 +521,16 @@ function workerPrompt(claimed: ClaimedTask): string {
   ].join("\n");
 }
 
+function taskVerificationCommands(
+  task: ClaimedTask["task"],
+  projectCommands: readonly string[],
+): string[] {
+  const project = new Set(projectCommands);
+  return (task.verificationExpectations ?? []).filter((command) => !project.has(command));
+}
+
 function commandEvidence(
-  phase: "setup" | "verification",
+  phase: "setup" | "task-verification" | "verification",
   outcome: CommandOutcome,
 ): Record<string, unknown> {
   return {

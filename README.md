@@ -32,6 +32,9 @@ and pushes to `main`.
 
 Requirements preparation is an upstream responsibility. Agent Runner does not ingest raw designs,
 generate requirements, or invoke Requirements Builder. It begins only with an approved task source.
+For Requirements Builder projects, it independently validates the versioned external handoff,
+active owner-approval record, exact GitHub issue contents and labels, and native dependencies before
+reporting or claiming work.
 
 ## Start here
 
@@ -100,6 +103,15 @@ creation is an owner-authorized operation; deterministic tests use a local fake 
 The built-in GitHub adapter reads issues and GitHub's native `blocked by` relationships. `ready` is
 read-only: it refreshes and validates the DAG but does not claim work or launch an agent.
 
+When `tasks.config.approvedHandoff` is set, the path resolves from the external contract folder and
+must remain outside the product repository. The Runner verifies the handoff hash, immutable approval
+record, active approval pointer, repository/base-branch identity, exact issue text and labels, and
+native dependency set. It preserves Requirements Builder task IDs rather than replacing them with
+issue numbers. An inactive approval, unknown version, edited issue, changed label/dependency, or
+altered handoff fails the entire read before a claim can be created. Task-specific approved
+verification commands run independently after the worker, followed by every project-level required
+verification command.
+
 `profiles` validates controller-owned worker configuration and prints only non-secret metadata. The
 default path is `~/.config/agent-runner/workers.yml`; `--profiles` or
 `AGENT_RUNNER_WORKER_CONFIG` selects another file. See the checked-in
@@ -156,5 +168,5 @@ should not receive Agent Runner code or required configuration files.
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License and public packaging are deferred; neither is required for the local workflow.
-- Next implementation gate: sync Requirements Builder issue drafts and native dependencies into a
-  review-only GitHub DAG. Agent Runner approval filtering remains later in the handoff sequence.
+- Next implementation gate: expand bounded concurrency and restart/status behavior through the
+  roadmap's safe parallel and unattended work package, then run one disposable end-to-end proof.

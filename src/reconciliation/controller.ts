@@ -295,7 +295,7 @@ export class ReconciliationController {
 
       const current = this.#runs.get(run.id) ?? run;
       if (current.baseSha !== request.currentBaseSha || current.requiresReverification) {
-        const synchronized = await this.#synchronize(current, execution.workspacePath, request);
+        const synchronized = await this.#synchronize(current, task, execution.workspacePath, request);
         if (synchronized !== "verified") {
           return {
             ...result(),
@@ -321,6 +321,7 @@ export class ReconciliationController {
 
   async #synchronize(
     initial: RunRecord,
+    task: TaskNode,
     workspacePath: string,
     request: ReconcileProjectRequest,
   ): Promise<"verified" | "waiting-human" | "failed"> {
@@ -354,7 +355,13 @@ export class ReconciliationController {
       });
     }
     const timeoutMs = request.contract.execution.timeoutMinutes * 60_000;
-    for (const command of request.contract.verification.required) {
+    const commands = [
+      ...(task.verificationExpectations ?? []).filter(
+        (command) => !request.contract.verification.required.includes(command),
+      ),
+      ...request.contract.verification.required,
+    ];
+    for (const command of commands) {
       if (!this.#runs.heartbeat(run.id, request.controllerId, this.#now(), request.leaseDurationMs)) {
         this.#terminal(run, "reconciliation-lease-lost", null);
         return "failed";

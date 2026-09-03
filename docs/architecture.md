@@ -153,3 +153,10 @@ requires both a turn limit and a wall-clock timeout. A production project may op
 The first concrete task/dependency pair is GitHub Issues plus native issue dependencies. It is a
 plug-in registration, not special behavior in the planner. Agent Runner's own external dogfood
 contract selects only issues labeled `agent:task`.
+
+Requirements Builder integrations add an external `approvedHandoff` path to that provider-owned
+configuration. Agent Runner parses and hashes the contract independently, verifies its active
+immutable approval record, then compares every live issue and native dependency before planning.
+This preserves upstream task IDs and makes a label alone insufficient authorization. Approved
+task-specific verification commands run outside the implementing worker in addition to the full
+project verification suite; both layers rerun after base synchronization.

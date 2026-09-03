@@ -13,11 +13,18 @@ tasks:
   config:
     includeLabels:
       - agent:task
+    approvedHandoff: ../requirements/APPROVED_HANDOFF.json
 ```
 
 When `includeLabels` is present, an issue must contain every configured label. With no labels
 configured, every issue is selected. Pull requests returned by the REST issues endpoint are always
 excluded.
+
+`approvedHandoff` enables the Requirements Builder boundary. The path is external to the product
+repository and may be relative to `runner/project.yml`. Agent Runner independently verifies its
+hash, the immutable approval record and active pointer, repository/base branch, exact issue content
+and labels, and native dependencies. It selects only the handoff task set and preserves stable
+Requirements Builder task IDs. The label is necessary but never sufficient authorization.
 
 ## Normalization
 
@@ -28,6 +35,11 @@ excluded.
 - Completed: a closed issue except `not_planned`
 - Blocked: `not_planned` or an open issue labeled `agent:blocked`
 - Prompt: issue title, URL, and body
+
+With an approved handoff, task revision is the approved graph hash plus stable task ID, and the
+prompt also identifies approved requirements, source evidence, acceptance criteria, and
+task-specific verification expectations. Those task commands run outside the worker before the
+project-wide verification suite.
 
 Native `blocked by` relationships become dependency edges. Same-repository dependencies must refer
 to another discovered issue. Missing issues, pagination/schema errors, and cross-repository
