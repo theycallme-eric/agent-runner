@@ -157,7 +157,10 @@ test("automatically merges the exact verified head and completes its source task
     async () => ({ status: "passed", evidence: ["required check passed"] }),
   );
   let mergeCalls = 0;
-  publisher.validateAutomaticMerge = async () => ["strict protected branch"];
+  publisher.validateAutomaticMerge = async () => ({
+    evidence: ["strict protected branch"],
+    requiredChecks: ["node-tests"],
+  });
   publisher.mergeVerified = async (_request, pullRequest) => {
     mergeCalls += 1;
     return {

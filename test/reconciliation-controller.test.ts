@@ -233,7 +233,10 @@ test("recovers an exact auto-merged pull request and completes its source task",
       throw new Error("must not update");
     },
     checkCi: async () => ({ status: "passed", evidence: ["required check passed"] }),
-    validateAutomaticMerge: async () => ["strict protected branch"],
+    validateAutomaticMerge: async () => ({
+      evidence: ["strict protected branch"],
+      requiredChecks: ["node-tests"],
+    }),
     mergeVerified: async () => {
       completionCalls += 1;
       return {

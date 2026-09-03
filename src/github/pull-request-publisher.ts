@@ -3,6 +3,9 @@ import { promisify } from "node:util";
 
 import type {
   AutomaticMergeResult,
+  AutomaticMergeValidation,
+  CiCheck,
+  CiCheckBucket,
   CiSnapshot,
   DraftPullRequestRequest,
   PullRequestPublisher,
@@ -41,6 +44,7 @@ interface RawCheck {
 
 interface RawBranchProtection {
   required_status_checks?: unknown;
+  enforce_admins?: unknown;
 }
 
 interface RawIssue {
@@ -213,7 +217,10 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     return parseChecks(output);
   }
 
-  async validateAutomaticMerge(repository: string, baseBranch: string): Promise<string[]> {
+  async validateAutomaticMerge(
+    repository: string,
+    baseBranch: string,
+  ): Promise<AutomaticMergeValidation> {
     validateRepository(repository);
     validateBranch(baseBranch, "baseBranch");
     const output = await this.#gh([
@@ -228,10 +235,19 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
         `Automatic merge requires strict branch protection and at least one required check on ${baseBranch}`,
       );
     }
-    return [
-      `Protected base branch: ${baseBranch}`,
-      `Required checks: ${protection.requiredChecks.join(", ")}`,
-    ];
+    if (!protection.enforceAdmins) {
+      throw new Error(
+        `Automatic merge requires enforce_admins on ${baseBranch}: enable "Do not allow bypassing the above settings" so branch protection binds every token, including administrators`,
+      );
+    }
+    return {
+      evidence: [
+        `Protected base branch: ${baseBranch}`,
+        `Required checks: ${protection.requiredChecks.join(", ")}`,
+        "Administrators cannot bypass required checks",
+      ],
+      requiredChecks: protection.requiredChecks,
+    };
   }
 
   async mergeVerified(
@@ -240,7 +256,8 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
   ): Promise<AutomaticMergeResult> {
     validateRequest(request);
     assertPullRequestIdentity(request, pullRequest);
-    const evidence = await this.validateAutomaticMerge(request.repository, request.baseBranch);
+    const validation = await this.validateAutomaticMerge(request.repository, request.baseBranch);
+    const evidence = [...validation.evidence];
     let observed = await this.inspectPullRequest(request.repository, pullRequest.externalId);
     if (!observed) {
       throw new Error(`Pull request ${pullRequest.externalId} disappeared before automatic merge`);
@@ -266,6 +283,20 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
         }
         observed = ready;
       }
+      const observedChecks = await this.checkCi(request, observed);
+      const unsatisfied = unsatisfiedRequiredChecks(
+        validation.requiredChecks,
+        observedChecks.checks ?? [],
+      );
+      if (unsatisfied.length > 0) {
+        throw new Error(
+          `Automatic merge requires a passing check for every required context on ${request.baseBranch}; ` +
+            `unsatisfied after the pull request became ready: ${unsatisfied.join(", ")}`,
+        );
+      }
+      evidence.push(
+        `Required checks re-observed as passing before merge: ${validation.requiredChecks.join(", ")}`,
+      );
       await this.#gh([
         "pr",
         "merge",
@@ -384,6 +415,22 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
   }
 }
 
+export function unsatisfiedRequiredChecks(
+  requiredChecks: string[],
+  observed: CiCheck[],
+): string[] {
+  const buckets = new Map<string, CiCheckBucket>();
+  for (const check of observed) {
+    const existing = buckets.get(check.name);
+    if (existing === undefined || existing === "pass") {
+      buckets.set(check.name, check.bucket);
+    }
+  }
+  return requiredChecks
+    .filter((context) => buckets.get(context) !== "pass")
+    .map((context) => `${context} (${buckets.get(context) ?? "not reported"})`);
+}
+
 export function recoverChecksOutput(error: unknown): string | null {
   if (typeof error !== "object" || error === null || Array.isArray(error)) {
     return null;
@@ -472,7 +519,7 @@ export function parseChecks(source: string): CiSnapshot {
     }
     return {
       name: stringValue(raw.name, `checks[${index}].name`),
-      bucket,
+      bucket: bucket as CiCheckBucket,
       link: raw.link === "" || raw.link === null ? null : stringValue(raw.link, `checks[${index}].link`),
     };
   });
@@ -486,12 +533,14 @@ export function parseChecks(source: string): CiSnapshot {
   return {
     status,
     evidence: checks.map((check) => `${check.name}: ${check.bucket}${check.link ? ` (${check.link})` : ""}`),
+    checks: checks.map((check): CiCheck => ({ name: check.name, bucket: check.bucket })),
   };
 }
 
 export function parseBranchProtection(source: string): {
   strict: boolean;
   requiredChecks: string[];
+  enforceAdmins: boolean;
 } {
   const value = JSON.parse(source) as unknown;
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -527,7 +576,18 @@ export function parseBranchProtection(source: string): {
   return {
     strict: booleanValue(required.strict, "required_status_checks.strict"),
     requiredChecks: [...new Set(names)].sort(),
+    enforceAdmins: parseEnforceAdmins(raw.enforce_admins),
   };
+}
+
+function parseEnforceAdmins(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("GitHub branch protection enforce_admins must be an object");
+  }
+  return booleanValue((value as { enabled?: unknown }).enabled, "enforce_admins.enabled");
 }
 
 export function parseIssue(source: string): {

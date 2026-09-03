@@ -25,9 +25,22 @@ export interface PullRequestSnapshot {
   state: "open" | "closed" | "merged";
 }
 
+export type CiCheckBucket = "pass" | "fail" | "pending" | "skipping" | "cancel";
+
+export interface CiCheck {
+  name: string;
+  bucket: CiCheckBucket;
+}
+
 export interface CiSnapshot {
   status: DeliveryCiStatus;
   evidence: string[];
+  checks?: CiCheck[];
+}
+
+export interface AutomaticMergeValidation {
+  evidence: string[];
+  requiredChecks: string[];
 }
 
 export interface AutomaticMergeResult {
@@ -48,7 +61,10 @@ export interface PullRequestPublisher {
     request: DraftPullRequestRequest,
     pullRequest: PullRequestSnapshot,
   ): Promise<CiSnapshot>;
-  validateAutomaticMerge?(repository: string, baseBranch: string): Promise<string[]>;
+  validateAutomaticMerge?(
+    repository: string,
+    baseBranch: string,
+  ): Promise<AutomaticMergeValidation>;
   mergeVerified?(
     request: DraftPullRequestRequest,
     pullRequest: PullRequestSnapshot,
