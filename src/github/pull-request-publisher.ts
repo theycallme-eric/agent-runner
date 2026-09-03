@@ -237,7 +237,9 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     }
     if (!protection.enforceAdmins) {
       throw new Error(
-        `Automatic merge requires enforce_admins on ${baseBranch}: enable "Do not allow bypassing the above settings" so branch protection binds every token, including administrators`,
+        `Automatic merge requires enforce_admins on ${baseBranch}: enable ` +
+          `"Do not allow bypassing the above settings" so branch protection binds ` +
+          "every token that can merge, including administrators",
       );
     }
     return {
@@ -290,12 +292,14 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
       );
       if (unsatisfied.length > 0) {
         throw new Error(
-          `Automatic merge requires a passing check for every required context on ${request.baseBranch}; ` +
-            `unsatisfied after the pull request became ready: ${unsatisfied.join(", ")}`,
+          "Automatic merge requires a passing check for every required context on " +
+            `${request.baseBranch}; unsatisfied after the pull request became ready: ` +
+            unsatisfied.join(", "),
         );
       }
       evidence.push(
-        `Required checks re-observed as passing before merge: ${validation.requiredChecks.join(", ")}`,
+        "Required checks re-observed as passing before merge: " +
+          validation.requiredChecks.join(", "),
       );
       await this.#gh([
         "pr",

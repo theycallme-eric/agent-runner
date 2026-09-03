@@ -268,10 +268,19 @@ test("a bounded CI wait expires without failing or transitioning the run", async
   const context = setup();
   context.request.contract = automaticMergeContract;
   context.request.maxCiWaitMinutes = 5;
+  const pending: CiSnapshot = {
+    status: "pending",
+    evidence: ["node-tests: pending"],
+    checks: [{ name: "node-tests", bucket: "pending" }],
+  };
   const checks: CiSnapshot[] = [
-    { status: "pending", evidence: ["node-tests: pending"], checks: [{ name: "node-tests", bucket: "pending" }] },
-    { status: "pending", evidence: ["node-tests: pending"], checks: [{ name: "node-tests", bucket: "pending" }] },
-    { status: "passed", evidence: ["node-tests: pass"], checks: [{ name: "node-tests", bucket: "pass" }] },
+    pending,
+    pending,
+    {
+      status: "passed",
+      evidence: ["node-tests: pass"],
+      checks: [{ name: "node-tests", bucket: "pass" }],
+    },
   ];
   const publisher = fakePublisher(async (request) => pullRequest(request, "107"), async () => {
     const next = checks.shift();

@@ -567,3 +567,57 @@ transcripts or secrets here.
   refusal, stable invocation leases, post-reconciliation base refresh, claim-ceiling draining,
   exact-head merge, post-merge issue completion, recovery, and completed-DAG reporting. No real
   product project was modified.
+
+## 2026-09-03 — Merge safety: required-context proof, bound protection, bounded CI waiting
+
+- Branch protection is now parsed for `enforce_admins` (absent counts as false), and automatic merge
+  refuses unless it is enabled, naming the GitHub setting in the refusal. That refusal binds at the
+  existing pre-claim preflight, dry runs included, and again inside `mergeVerified`.
+  `validateAutomaticMerge` now returns `{ evidence, requiredChecks }`; `run-once` still ignores the
+  value and uses the call only as a gate.
+- `parseChecks` carries structured `name`/`bucket` rows on `CiSnapshot`. `mergeVerified` re-observes
+  checks after the pull request becomes ready and immediately before `gh pr merge`, and refuses
+  unless every required context reports bucket `pass`. Skipped and cancelled checks do not satisfy a
+  required context.
+- The delivery coordinator reconciles the observed rows against the required contexts before acting
+  on the aggregate status. A failing or cancelled required context fails the run; a missing, pending,
+  or skipped one downgrades an apparent pass to waiting and names the outstanding contexts in the
+  result message, the persisted CI status, and `required-checks-incomplete` evidence; an apparent
+  pass that carries no rows at all under the automatic policy refuses terminally as
+  `required-checks-unreported` rather than merging on an unverifiable reading.
+- Waiting runs record a per-pull-request clock in the new `run_ci_wait` table, created with
+  `IF NOT EXISTS` and with no change to any existing table. The clock persists across passes and
+  controller restarts, is never reset by another branch progressing, starts again only when that
+  pull request's head changes, and is deleted when required CI passes or fails. Its bound is
+  `delivery.maxCiWaitMinutes` when set, otherwise `--max-ci-wait-minutes` (default 30). Expiry is
+  reported as `ciWaitExpired` and never fails or transitions a run, so an expired wait stays
+  resumable. `merge: never` projects gain no protection requirements; the shared clock applies to
+  their waiting runs and still never fails them.
+- Autopilot no longer lets a transient delivery error anywhere in a pass mask a terminal run failure:
+  any task carrying a `failureReason` stops the session with `run-failure`, and the retryable
+  shortcut now applies only when the pass holds no terminal failure. An unexpired waiting-ci item
+  counts as progress, so an unattended session waits on genuinely pending required CI instead of
+  dying in three quiet passes; an expired one stops with the new `ci-wait-timeout` reason, and the
+  morning report lists the affected pull request and its outstanding checks.
+- What failed on the way. The nine planned tests were written first and observed red at `d220071`.
+  The existing happy-path publisher fake merged while reporting a check named `verify` against a
+  required context of `node-tests` and no `enforce_admins`; it began failing as soon as the
+  comparison existed, which is the regression evidence this package expected, and the fake was
+  corrected rather than the assertion weakened. Two in-memory coordinator fakes reported an aggregate
+  `passed` with no check rows and hit the new fail-closed refusal; they now supply rows. One new test
+  read the wait clock after the completing pass had already cleared it and was corrected to read it
+  while the run was still waiting.
+- Environment note. This session could not delete files inside the support folder, so the `prebuild`
+  clean step could not run. The suites were compiled with `tsc` and executed directly, and
+  `scripts/verify-all.mjs` was run with `npm_config_ignore_scripts=true`, which skips only that clean
+  step and still builds before testing. Git could not remove its own lock and temporary object files;
+  they were moved to `.git/_to_delete/` and are safe to delete.
+- Evidence: TypeScript checks pass for both tools; agent-runner 104 tests pass, up from 93 at
+  `d220071`; requirements-builder 32 tests pass; `node scripts/verify-all.mjs` reports every tool
+  green. All new coverage uses the existing fake `gh`/`git` scripts or in-memory fakes. No product
+  repository, live contract, approval record, run state, or GitHub state was touched.
+- Open decisions, deliberately not made here. `autopilot` still exits non-zero only for
+  `run-failure`, `worker-unavailable`, and `quota-unavailable`; whether `ci-wait-timeout` should also
+  exit non-zero is an owner call. `docs/autopilot.md`'s stop-condition list still omits
+  `ci-wait-timeout` because the package assigned that line to `docs/automatic-merge.md` alone.
+  `AGENTS.md` remains stale about automatic merging (R-18), and the rest of R-13 is untouched.

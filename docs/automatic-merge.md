@@ -21,8 +21,10 @@ adapter must prove that it supports automatic merging. The GitHub adapter also r
 base branch to have:
 
 - branch protection enabled;
-- strict, up-to-date branch checks; and
-- at least one named required status check.
+- strict, up-to-date branch checks;
+- at least one named required status check; and
+- `enforce_admins` enabled ("Do not allow bypassing the above settings"), so protection binds every
+  token that can merge, including the owner's administrator token.
 
 For each node, the controller still requires a clean isolated workspace, a non-empty committed
 change, independent task and project verification, no protected-path gate, an unchanged base, and a
@@ -42,6 +44,13 @@ request identity changed; verification failed; a protected path or explicit huma
 the worker or provider is unavailable; retries are exhausted; or the bounded unattended session has
 reached its time, claim, or no-progress limit. Retryable GitHub delivery errors remain in durable
 state and are retried until that bounded limit instead of being mistaken for completed work.
+
+A required context that has not reported, is still queued, or was skipped or cancelled is not a
+pass: the Runner waits instead of merging. Each waiting pull request carries its own persistent
+wait clock, bounded by `--max-ci-wait-minutes` (default 30) or the contract's
+`delivery.maxCiWaitMinutes`. When that bound passes, an unattended session stops with the
+`ci-wait-timeout` reason and names the pull request and outstanding checks. The clock never fails
+or transitions the run, so the session resumes from durable state once the checks report.
 
 ## Build branch and final release
 

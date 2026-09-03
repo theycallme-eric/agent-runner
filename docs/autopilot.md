@@ -10,8 +10,17 @@ agent-runner autopilot --enable \
   --max-new-claims 3 \
   --concurrency 2 \
   --no-progress-passes 3 \
-  --poll-seconds 60
+  --poll-seconds 60 \
+  --max-ci-wait-minutes 30
 ```
+
+`--max-ci-wait-minutes` bounds how long one pull request may sit on genuinely pending or unreported
+required checks. It defaults to 30 minutes, is overridden per project by the contract's
+`delivery.maxCiWaitMinutes`, and is measured by a persistent per-pull-request clock. That clock
+survives passes and controller restarts, is never reset by another branch making progress, and
+starts again only when that pull request's head changes. While the clock is unexpired, a waiting
+pull request counts as progress rather than an idle pass; when it expires the session stops with
+the `ci-wait-timeout` reason, leaving the run resumable.
 
 Without `--enable`, the command fails before any project pass. Global concurrency defaults to one
 and can be explicitly raised to at most 16. Projects remain in stable registry order; within a
