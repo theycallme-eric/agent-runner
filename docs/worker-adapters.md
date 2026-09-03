@@ -52,8 +52,8 @@ valid profile value.
 ## Native adapters
 
 `ClaudeCodeWorker` invokes Claude Code with explicit model, tool, permission, setting-source, MCP,
-session, turn, budget, and timeout choices. CLEAR's first worker selection is Fable, but changing
-that selection does not change the controller or CLEAR's contract.
+session, turn, budget, and timeout choices. The live acceptance proof selected Fable, but changing
+that selection does not change the controller or a product's contract.
 
 Native Codex, OpenHands, or other adapters can implement `WorkerAdapter` when their richer event and
 resume semantics are useful.
@@ -92,8 +92,8 @@ the controller treats all of them identically after normalization.
 ## Trust boundary
 
 A worker success report is never sufficient to complete a run. Agent Runner independently checks the
-workspace, runs project verification, rejects an advanced base, evaluates protected paths, and
-records a committed verified head. The simulator proves full re-verification after synchronization;
-the concrete executor currently stops safely on an advanced base until reconciliation is connected.
-The separate delivery coordinator then owns draft pull-request identity and CI observation without
-granting the worker publication or merge authority.
+workspace, runs project verification, rejects an advanced base during the initial attempt, evaluates
+protected paths, and records a committed verified head. Reconciliation synchronizes an advanced
+base, repeats all required verification, and updates the same pull request only after the new head
+passes. The separate delivery coordinator owns pull-request identity, CI observation, and any
+policy-authorized exact-head merge without granting that authority to the worker.

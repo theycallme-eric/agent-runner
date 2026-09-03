@@ -4,6 +4,18 @@ Concise chronological handoff for humans and coding agents. Record material chan
 approaches, corrections, verification evidence, and the next open decision. Do not copy chat
 transcripts or secrets here.
 
+## 2026-09-03 — Closeout documentation reconciliation
+
+- Reconciled the worker boundary documentation with the completed live acceptance proof: Fable is
+  the first live-tested worker, not a product or controller dependency.
+- Removed stale current-language claims that advanced-base reconciliation was still disconnected;
+  the current path synchronizes, independently reverifies, and updates the same pull request.
+- Generalized current product examples so Clear, PNQ, and later projects remain equally external and
+  require explicit owner selection. Marked the older landscape document as a historical research
+  snapshot rather than a current gap list.
+- No runtime behavior changed. The next gate remains an owner-selected real project; interface work
+  is optional and separate.
+
 ## 2026-09-03 — Correct live Fable selection and isolate provider credentials
 
 - The disposable end-to-end proof found that the shipped `fable` short model value returns 404 in

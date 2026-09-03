@@ -37,7 +37,7 @@ Example external contract:
 ```yaml
 version: 1
 project:
-  id: theycallme-eric/clear
+  id: owner/example-project
   baseBranch: main
 tasks:
   provider: github
@@ -114,7 +114,7 @@ questions with executable evidence:
 - A protected-path change stops at a visible human gate.
 - The evidence supports an explicit adopt, extend, or build decision for each layer.
 
-Only after this spike should CLEAR receive its adapter.
+Only after this spike should any real product be registered with the Runner.
 
 ## Executable evidence so far
 

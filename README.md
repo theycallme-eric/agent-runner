@@ -3,8 +3,8 @@
 Local, project-agnostic control plane for running an approved dependency graph through isolated
 coding agents, independent verification, and policy-controlled pull requests.
 
-These tools live outside product repositories. Product repositories such as CLEAR remain independent;
-the boundary requires no Agent Runner package, service, instructions, or checked-in configuration.
+These tools live outside product repositories. Every product repository remains independent; the
+boundary requires no Agent Runner package, service, instructions, or checked-in configuration.
 Each project's Runner contract lives in its external support workspace.
 
 ## Current state
@@ -142,12 +142,12 @@ See [the autopilot contract](docs/autopilot.md).
 The controller depends only on the `WorkerAdapter` interface. Agent- and model-specific settings do
 not appear in the external project contract or the lifecycle core.
 
-- `ClaudeCodeWorker` is the first native adapter; CLEAR will initially select Fable through it.
+- `ClaudeCodeWorker` is the first native adapter; the live acceptance proof selected Fable through it.
 - `JsonProcessWorker` runs any local CLI or SDK wrapper that implements the versioned JSON protocol.
 - Codex, OpenHands, and future workers can add native adapters without changing task claims,
   workspaces, verification, delivery policy, or product repositories.
 
-Fable is a dogfood choice for CLEAR, not an Agent Runner dependency.
+Fable is the first live-tested worker choice, not an Agent Runner dependency.
 
 `npm run smoke:fable` is a manual diagnostic, not part of verification or unattended execution. Set
 `AGENT_RUNNER_CLAUDE_BIN` when the intended Claude Code binary is not first on `PATH`. Do not treat
@@ -174,11 +174,12 @@ approve every pull request. Protected paths and other explicit human gates still
 project may target a dedicated build branch so final promotion or release remains the owner's one
 consolidated action.
 
-## Relationship to CLEAR
+## Relationship to product projects
 
-CLEAR is an intended consumer, not part of this repository. Its requirements are prepared and
-approved upstream. The runner can build it through external profiles and isolated worktrees. CLEAR
-should not receive Agent Runner code or required configuration files.
+Clear, PNQ, or any later product may become a consumer only after the owner explicitly selects it.
+Its requirements are prepared and approved upstream, and the Runner works through external profiles
+and isolated worktrees. Product repositories do not receive Agent Runner code or required
+configuration files.
 
 ## Repository status
 

@@ -1,5 +1,9 @@
 # Agent orchestration landscape — August 2026
 
+This is the historical research snapshot that informed the first implementation. For current
+capabilities and next steps, use the repository README and architecture document; several gaps
+listed below have since been implemented and live-verified.
+
 The ecosystem already provides most worker and specification primitives. Agent Runner should build
 only the missing project-level delivery control plane, or extend an existing permissively licensed
 controller when that is safer.
@@ -40,7 +44,7 @@ The public [Fable orchestration playbook](https://github.com/eliasforge/fable-ag
 contains useful review and negative-control patterns, but it is an AGPL skill library rather than a
 durable controller. Treat it as a reference unless this project deliberately adopts AGPL.
 
-## What remains genuinely missing
+## What the initial research found missing
 
 - One task to one branch/workspace/session/PR ownership
 - Base-commit tracking, conflict prediction, and final-tree synchronization
