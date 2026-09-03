@@ -45,12 +45,12 @@ test("loads Claude and arbitrary JSON worker profiles without exposing resolved 
     const claudeResult = await loaded.registry.get("claude-fable").run({
       workspacePath: directory,
       prompt: "fixture",
-      timeoutMs: 1_000,
+      timeoutMs: 5_000,
     });
     const genericResult = await loaded.registry.get("generic-agent").run({
       workspacePath: directory,
       prompt: "fixture",
-      timeoutMs: 1_000,
+      timeoutMs: 5_000,
     });
     assert.equal(claudeResult.status, "succeeded");
     assert.equal(genericResult.status, "succeeded");

@@ -500,3 +500,6 @@ transcripts or secrets here.
 - Added deterministic coverage that the explicit ceiling reaches run-once and that invalid capacity
   is rejected. Cross-project parallelism remains intentionally out of scope until a shared atomic
   provider-capacity ledger exists.
+- The expanded cross-tool suite reproduced a one-second synthetic worker test timeout under process
+  contention. Raised only the copied test harness allowance to five seconds; production worker
+  timeouts and limits are unchanged.
