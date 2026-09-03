@@ -64,8 +64,14 @@ Delivery selects its own plug-in so task discovery and pull-request hosting are 
 delivery:
   provider: github
   pullRequest: true
-  merge: never
+  merge: after-required-checks
 ```
+
+Use `merge: after-required-checks` when the approved DAG should run autonomously. GitHub must already
+have strict protection on `project.baseBranch` with at least one required status check; both dry run
+and real execution fail before a claim or coding-agent launch if that safeguard is missing. Use
+`merge: never` when every pull request should remain a human merge. These are execution policies, not
+publication or licensing choices. See [Protected automatic merge](automatic-merge.md).
 
 The task provider normalizes task id, revision, title, prompt, status, and dependency references. The
 dependency resolver may preserve those references or derive them from another source. Neither name
@@ -90,8 +96,9 @@ the declared worker capacity.
 
 Registration, project status, profile listing, readiness, and `run-once --dry-run` do not modify the
 product or launch a coding agent. Mutating execution begins only at explicit `run-once`, which
-consumes claims through the normalized worker interface and can publish drafts through the
-separately selected delivery adapter.
+consumes claims through the normalized worker interface and delivers pull requests through the
+separately selected adapter. `autopilot --enable` repeats that path within explicit time, claim,
+parallelism, and no-progress bounds.
 
 ## Explicit repository creation
 

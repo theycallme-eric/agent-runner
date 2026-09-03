@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import type {
+  AutomaticMergeResult,
   CiSnapshot,
   DraftPullRequestRequest,
   PullRequestPublisher,
@@ -36,6 +37,17 @@ interface RawCheck {
   name?: unknown;
   bucket?: unknown;
   link?: unknown;
+}
+
+interface RawBranchProtection {
+  required_status_checks?: unknown;
+}
+
+interface RawIssue {
+  number?: unknown;
+  state?: unknown;
+  state_reason?: unknown;
+  pull_request?: unknown;
 }
 
 export interface GitHubPullRequestPublisherOptions {
@@ -201,6 +213,92 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     return parseChecks(output);
   }
 
+  async validateAutomaticMerge(repository: string, baseBranch: string): Promise<string[]> {
+    validateRepository(repository);
+    validateBranch(baseBranch, "baseBranch");
+    const output = await this.#gh([
+      "api",
+      `repos/${repository}/branches/${encodeURIComponent(baseBranch)}/protection`,
+      "--header",
+      "X-GitHub-Api-Version: 2026-03-10",
+    ]);
+    const protection = parseBranchProtection(output);
+    if (!protection.strict || protection.requiredChecks.length === 0) {
+      throw new Error(
+        `Automatic merge requires strict branch protection and at least one required check on ${baseBranch}`,
+      );
+    }
+    return [
+      `Protected base branch: ${baseBranch}`,
+      `Required checks: ${protection.requiredChecks.join(", ")}`,
+    ];
+  }
+
+  async mergeVerified(
+    request: DraftPullRequestRequest,
+    pullRequest: PullRequestSnapshot,
+  ): Promise<AutomaticMergeResult> {
+    validateRequest(request);
+    assertPullRequestIdentity(request, pullRequest);
+    const evidence = await this.validateAutomaticMerge(request.repository, request.baseBranch);
+    let observed = await this.inspectPullRequest(request.repository, pullRequest.externalId);
+    if (!observed) {
+      throw new Error(`Pull request ${pullRequest.externalId} disappeared before automatic merge`);
+    }
+    assertPullRequestIdentity(request, observed);
+
+    if (observed.state === "open") {
+      if (observed.draft) {
+        await this.#gh([
+          "pr",
+          "ready",
+          observed.externalId,
+          "--repo",
+          request.repository,
+        ]);
+        const ready = await this.inspectPullRequest(request.repository, observed.externalId);
+        if (!ready) {
+          throw new Error(`Pull request ${observed.externalId} disappeared after becoming ready`);
+        }
+        assertPullRequestIdentity(request, ready);
+        if (ready.state !== "open" || ready.draft) {
+          throw new Error(`Pull request ${ready.externalId} did not become merge-ready`);
+        }
+        observed = ready;
+      }
+      await this.#gh([
+        "pr",
+        "merge",
+        observed.externalId,
+        "--repo",
+        request.repository,
+        "--squash",
+        "--match-head-commit",
+        request.headSha,
+      ]);
+      const merged = await this.inspectPullRequest(request.repository, observed.externalId);
+      if (!merged) {
+        throw new Error(`Pull request ${observed.externalId} disappeared after automatic merge`);
+      }
+      assertPullRequestIdentity(request, merged);
+      observed = merged;
+    }
+    if (observed.state !== "merged" || observed.draft) {
+      throw new Error(`Pull request ${observed.externalId} was not merged exactly as verified`);
+    }
+
+    const taskCompleted = await this.#completeIssue(request.repository, request.sourceId);
+    return {
+      pullRequest: observed,
+      taskCompleted,
+      evidence: [
+        ...evidence,
+        `Merged pull request ${observed.externalId} at verified head ${observed.headSha}`,
+        `Completed task issue #${request.sourceId}`,
+      ],
+    };
+  }
+
   async #list(request: DraftPullRequestRequest): Promise<PullRequestSnapshot[]> {
     const output = await this.#gh([
       "pr",
@@ -217,6 +315,43 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
       "2",
     ]);
     return parsePullRequests(output);
+  }
+
+  async #completeIssue(repository: string, sourceId: string): Promise<boolean> {
+    if (!/^[1-9][0-9]*$/.test(sourceId)) {
+      throw new Error(`GitHub automatic merge requires a numeric issue source id: ${sourceId}`);
+    }
+    const endpoint = `repos/${repository}/issues/${sourceId}`;
+    const current = parseIssue(await this.#gh([
+      "api",
+      endpoint,
+      "--header",
+      "X-GitHub-Api-Version: 2026-03-10",
+    ]));
+    if (current.number !== Number(sourceId)) {
+      throw new Error(`GitHub returned a different task issue for #${sourceId}`);
+    }
+    if (current.state === "closed" && current.stateReason === "completed") {
+      return true;
+    }
+    if (current.state === "closed") {
+      throw new Error(`Task issue #${sourceId} is closed as ${current.stateReason ?? "unknown"}`);
+    }
+    const completed = parseIssue(await this.#gh([
+      "api",
+      "--method",
+      "PATCH",
+      endpoint,
+      "-f",
+      "state=closed",
+      "-f",
+      "state_reason=completed",
+      "--header",
+      "X-GitHub-Api-Version: 2026-03-10",
+    ]));
+    return completed.number === Number(sourceId) &&
+      completed.state === "closed" &&
+      completed.stateReason === "completed";
   }
 
   async #gh(argumentsList: string[]): Promise<string> {
@@ -354,15 +489,77 @@ export function parseChecks(source: string): CiSnapshot {
   };
 }
 
+export function parseBranchProtection(source: string): {
+  strict: boolean;
+  requiredChecks: string[];
+} {
+  const value = JSON.parse(source) as unknown;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("GitHub branch-protection response must be an object");
+  }
+  const raw = value as RawBranchProtection;
+  if (
+    typeof raw.required_status_checks !== "object" ||
+    raw.required_status_checks === null ||
+    Array.isArray(raw.required_status_checks)
+  ) {
+    throw new Error("GitHub branch protection has no required status checks");
+  }
+  const required = raw.required_status_checks as {
+    strict?: unknown;
+    checks?: unknown;
+    contexts?: unknown;
+  };
+  const names: string[] = [];
+  if (Array.isArray(required.checks)) {
+    for (const [index, entry] of required.checks.entries()) {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        throw new Error(`required_status_checks.checks[${index}] must be an object`);
+      }
+      const context = (entry as { context?: unknown }).context;
+      names.push(stringValue(context, `required_status_checks.checks[${index}].context`));
+    }
+  } else if (Array.isArray(required.contexts)) {
+    names.push(...required.contexts.map((entry, index) =>
+      stringValue(entry, `required_status_checks.contexts[${index}]`)
+    ));
+  }
+  return {
+    strict: booleanValue(required.strict, "required_status_checks.strict"),
+    requiredChecks: [...new Set(names)].sort(),
+  };
+}
+
+export function parseIssue(source: string): {
+  number: number;
+  state: "open" | "closed";
+  stateReason: string | null;
+} {
+  const value = JSON.parse(source) as unknown;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("GitHub issue response must be an object");
+  }
+  const raw = value as RawIssue;
+  if (raw.pull_request !== undefined) {
+    throw new Error("GitHub task source points to a pull request, not an issue");
+  }
+  const state = stringValue(raw.state, "issue.state");
+  if (state !== "open" && state !== "closed") {
+    throw new Error(`Unsupported GitHub issue state: ${state}`);
+  }
+  return {
+    number: positiveInteger(raw.number, "issue.number"),
+    state,
+    stateReason: raw.state_reason === null || raw.state_reason === undefined
+      ? null
+      : stringValue(raw.state_reason, "issue.state_reason"),
+  };
+}
+
 function validateRequest(request: DraftPullRequestRequest): void {
   validateRepository(request.repository);
-  if (
-    !BRANCH.test(request.branchName) ||
-    request.branchName.includes("..") ||
-    request.branchName.startsWith("-")
-  ) {
-    throw new Error(`Unsafe GitHub branch name: ${request.branchName}`);
-  }
+  validateBranch(request.branchName, "branchName");
+  validateBranch(request.baseBranch, "baseBranch");
   for (const [path, value] of [
     ["repositoryPath", request.repositoryPath],
     ["workspacePath", request.workspacePath],
@@ -374,6 +571,27 @@ function validateRequest(request: DraftPullRequestRequest): void {
     if (value.trim() === "") {
       throw new Error(`${path} must be non-empty`);
     }
+  }
+}
+
+function validateBranch(branch: string, path: string): void {
+  if (!BRANCH.test(branch) || branch.includes("..") || branch.startsWith("-")) {
+    throw new Error(`Unsafe GitHub ${path}: ${branch}`);
+  }
+}
+
+function assertPullRequestIdentity(
+  request: DraftPullRequestRequest,
+  pullRequest: PullRequestSnapshot,
+): void {
+  if (
+    pullRequest.externalId.trim() === "" ||
+    pullRequest.url.trim() === "" ||
+    pullRequest.branchName !== request.branchName ||
+    pullRequest.baseBranch !== request.baseBranch ||
+    pullRequest.headSha !== request.headSha
+  ) {
+    throw new Error("Pull request identity or head changed before automatic merge");
   }
 }
 

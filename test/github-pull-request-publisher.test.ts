@@ -7,7 +7,9 @@ import test from "node:test";
 import type { DraftPullRequestRequest } from "../src/delivery/types.js";
 import {
   GitHubPullRequestPublisher,
+  parseBranchProtection,
   parseChecks,
+  parseIssue,
   parsePullRequest,
   parsePullRequests,
   recoverChecksOutput,
@@ -75,13 +77,41 @@ test("distinguishes GitHub's no-checks response from other command failures", ()
   );
 });
 
+test("requires strict branch protection with named checks and a real issue source", () => {
+  assert.deepEqual(parseBranchProtection(JSON.stringify({
+    required_status_checks: {
+      strict: true,
+      checks: [{ context: "node-tests", app_id: 15368 }],
+    },
+  })), { strict: true, requiredChecks: ["node-tests"] });
+  assert.throws(
+    () => parseBranchProtection(JSON.stringify({ required_status_checks: null })),
+    /no required status checks/,
+  );
+  assert.deepEqual(parseIssue(JSON.stringify({
+    number: 12,
+    state: "closed",
+    state_reason: "completed",
+  })), { number: 12, state: "closed", stateReason: "completed" });
+  assert.throws(
+    () => parseIssue(JSON.stringify({
+      number: 12,
+      state: "open",
+      state_reason: null,
+      pull_request: { url: "https://api.github.com/pulls/12" },
+    })),
+    /not an issue/,
+  );
+});
+
 test("pushes and reconciles the same GitHub draft pull request", async () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-runner-github-delivery-"));
   const gh = join(directory, "fake-gh");
   const git = join(directory, "fake-git");
   const pullRequestState = join(directory, "pull-request.json");
+  const issueState = join(directory, "issue.json");
   const calls = join(directory, "calls.log");
-  writeFileSync(gh, fakeGhScript(pullRequestState, calls));
+  writeFileSync(gh, fakeGhScript(pullRequestState, issueState, calls));
   writeFileSync(git, fakeGitScript(calls));
   chmodSync(gh, 0o755);
   chmodSync(git, 0o755);
@@ -109,6 +139,72 @@ test("pushes and reconciles the same GitHub draft pull request", async () => {
   }
 });
 
+test("merges only the exact verified head on a protected branch and closes its task issue", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-runner-github-auto-merge-"));
+  const gh = join(directory, "fake-gh");
+  const git = join(directory, "fake-git");
+  const pullRequestState = join(directory, "pull-request.json");
+  const issueState = join(directory, "issue.json");
+  const calls = join(directory, "calls.log");
+  writeFileSync(gh, fakeGhScript(pullRequestState, issueState, calls));
+  writeFileSync(git, fakeGitScript(calls));
+  chmodSync(gh, 0o755);
+  chmodSync(git, 0o755);
+  const publisher = new GitHubPullRequestPublisher({ ghExecutable: gh, gitExecutable: git });
+  const request = fixtureRequest(directory);
+
+  try {
+    const draft = await publisher.publishDraft(request);
+    const protection = await publisher.validateAutomaticMerge(
+      request.repository,
+      request.baseBranch,
+    );
+    const result = await publisher.mergeVerified(request, draft);
+    const log = readFileSync(calls, "utf8");
+
+    assert.deepEqual(protection, [
+      "Protected base branch: main",
+      "Required checks: node-tests",
+    ]);
+    assert.equal(result.pullRequest.state, "merged");
+    assert.equal(result.pullRequest.draft, false);
+    assert.equal(result.pullRequest.headSha, "head-a");
+    assert.equal(result.taskCompleted, true);
+    assert.match(log, /^gh ready$/m);
+    assert.match(log, /^gh merge head-a$/m);
+    assert.match(log, /^gh close issue 1$/m);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses automatic merge when strict required-check protection is absent", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-runner-github-unprotected-"));
+  const gh = join(directory, "fake-gh");
+  const git = join(directory, "fake-git");
+  const calls = join(directory, "calls.log");
+  writeFileSync(gh, fakeGhScript(
+    join(directory, "pull-request.json"),
+    join(directory, "issue.json"),
+    calls,
+    false,
+  ));
+  writeFileSync(git, fakeGitScript(calls));
+  chmodSync(gh, 0o755);
+  chmodSync(git, 0o755);
+  const publisher = new GitHubPullRequestPublisher({ ghExecutable: gh, gitExecutable: git });
+
+  try {
+    await assert.rejects(
+      publisher.validateAutomaticMerge("example/repo", "main"),
+      /requires strict branch protection/,
+    );
+    assert.doesNotMatch(readFileSync(calls, "utf8"), /^gh merge/m);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 function fixtureRequest(directory: string): DraftPullRequestRequest {
   return {
     repository: "example/repo",
@@ -126,11 +222,17 @@ function fixtureRequest(directory: string): DraftPullRequestRequest {
   };
 }
 
-function fakeGhScript(statePath: string, callsPath: string): string {
+function fakeGhScript(
+  statePath: string,
+  issueStatePath: string,
+  callsPath: string,
+  protectionStrict = true,
+): string {
   return `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const statePath = ${JSON.stringify(statePath)};
+const issueStatePath = ${JSON.stringify(issueStatePath)};
 const callsPath = ${JSON.stringify(callsPath)};
 const append = value => fs.appendFileSync(callsPath, value + "\\n");
 if (args[0] === "pr" && args[1] === "list") {
@@ -143,6 +245,8 @@ if (args[0] === "pr" && args[1] === "list") {
     number: 7,
     url: "https://github.com/example/repo/pull/7",
     isDraft: true,
+    state: "open",
+    mergedAt: null,
     headRefName: head,
     baseRefName: base,
     headRefOid: "head-a"
@@ -150,21 +254,57 @@ if (args[0] === "pr" && args[1] === "list") {
   process.stdout.write("https://github.com/example/repo/pull/7\\n");
 } else if (args[0] === "pr" && args[1] === "edit") {
   append("gh edit");
+} else if (args[0] === "pr" && args[1] === "ready") {
+  append("gh ready");
+  const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  state[0].isDraft = false;
+  fs.writeFileSync(statePath, JSON.stringify(state));
+} else if (args[0] === "pr" && args[1] === "merge") {
+  const head = args[args.indexOf("--match-head-commit") + 1];
+  append("gh merge " + head);
+  const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  state[0].state = "closed";
+  state[0].mergedAt = "2026-09-03T00:00:00Z";
+  fs.writeFileSync(statePath, JSON.stringify(state));
 } else if (args[0] === "pr" && args[1] === "checks") {
   append("gh checks");
   process.stdout.write(JSON.stringify([{ name: "verify", bucket: "pass", link: "" }]));
 } else if (args[0] === "api") {
-  append("gh inspect");
-  const state = JSON.parse(fs.readFileSync(statePath, "utf8"))[0];
-  process.stdout.write(JSON.stringify({
-    number: state.number,
-    html_url: state.url,
-    draft: state.isDraft,
-    state: "open",
-    merged_at: null,
-    head: { ref: state.headRefName, sha: state.headRefOid },
-    base: { ref: state.baseRefName, sha: "base-a" }
-  }));
+  const endpoint = args.find(value => value.startsWith("repos/"));
+  if (endpoint && endpoint.endsWith("/protection")) {
+    append("gh protection");
+    process.stdout.write(JSON.stringify({
+      required_status_checks: {
+        strict: ${JSON.stringify(protectionStrict)},
+        checks: [{ context: "node-tests", app_id: 15368 }]
+      }
+    }));
+  } else if (endpoint && endpoint.includes("/issues/")) {
+    const issue = fs.existsSync(issueStatePath)
+      ? JSON.parse(fs.readFileSync(issueStatePath, "utf8"))
+      : { number: 1, state: "open", state_reason: null };
+    if (args.includes("PATCH")) {
+      issue.state = "closed";
+      issue.state_reason = "completed";
+      fs.writeFileSync(issueStatePath, JSON.stringify(issue));
+      append("gh close issue 1");
+    } else {
+      append("gh inspect issue 1");
+    }
+    process.stdout.write(JSON.stringify(issue));
+  } else {
+    append("gh inspect");
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8"))[0];
+    process.stdout.write(JSON.stringify({
+      number: state.number,
+      html_url: state.url,
+      draft: state.isDraft,
+      state: state.state,
+      merged_at: state.mergedAt,
+      head: { ref: state.headRefName, sha: state.headRefOid },
+      base: { ref: state.baseRefName, sha: "base-a" }
+    }));
+  }
 } else {
   process.stderr.write("unexpected gh arguments: " + JSON.stringify(args));
   process.exit(2);

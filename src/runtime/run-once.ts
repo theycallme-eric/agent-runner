@@ -113,6 +113,14 @@ export class RunOnceController {
     const publisher = contract.delivery.pullRequest
       ? this.#publishers.get(contract.delivery.provider)
       : null;
+    if (contract.delivery.merge === "after-required-checks") {
+      if (!publisher?.validateAutomaticMerge || !publisher.mergeVerified) {
+        throw new Error(
+          `Delivery provider ${contract.delivery.provider} does not support automatic merging`,
+        );
+      }
+      await publisher.validateAutomaticMerge(project.id, contract.project.baseBranch);
+    }
     const baseSha = request.dryRun
       ? await this.#baseRevisions.inspect(project.rootPath, contract.project.baseBranch)
       : await this.#baseRevisions.refresh(project.rootPath, contract.project.baseBranch);

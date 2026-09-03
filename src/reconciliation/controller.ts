@@ -105,8 +105,22 @@ export class ReconciliationController {
       .listProject(request.project.id)
       .filter((run) => !["completed", "failed"].includes(run.state));
     const results: ReconciliationResult[] = [];
+    let currentBaseSha = request.currentBaseSha;
     for (const run of runs) {
-      results.push(await this.#reconcileRun(run, tasks.get(run.taskId), request));
+      const result = await this.#reconcileRun(run, tasks.get(run.taskId), {
+        ...request,
+        currentBaseSha,
+      });
+      results.push(result);
+      if (
+        request.contract.delivery.merge === "after-required-checks" &&
+        result.outcome === "completed"
+      ) {
+        currentBaseSha = await this.#baseRevisions.refresh(
+          request.project.rootPath,
+          request.contract.project.baseBranch,
+        );
+      }
     }
     return results;
   }
@@ -272,7 +286,8 @@ export class ReconciliationController {
           return this.#fail(run, "pull-request-missing", delivery, result, undefined, "missing");
         }
         observedPullRequestState = observed.state;
-        if (observed.state !== "open") {
+        const automaticMerge = request.contract.delivery.merge === "after-required-checks";
+        if (observed.state !== "open" && !(automaticMerge && observed.state === "merged")) {
           return this.#fail(
             run,
             observed.state === "merged" ? "pull-request-merged" : "pull-request-closed",
@@ -283,13 +298,18 @@ export class ReconciliationController {
           );
         }
         if (
-          !observed.draft ||
+          (!automaticMerge && !observed.draft) ||
           observed.externalId !== delivery.externalId ||
           observed.branchName !== delivery.branchName ||
           observed.baseBranch !== delivery.baseBranch ||
           (observed.headSha !== delivery.headSha && observed.headSha !== run.headSha)
         ) {
           return this.#fail(run, "pull-request-identity-drift", observed, result);
+        }
+        if (observed.state === "merged") {
+          const delivered = await this.#deliver(run.id, task, request);
+          const final = result();
+          return { ...final, outcome: delivered.outcome, pullRequestState: "merged" };
         }
       }
 

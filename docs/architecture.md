@@ -60,7 +60,7 @@ execution:
 delivery:
   provider: github
   pullRequest: true
-  merge: never
+  merge: after-required-checks
 ```
 
 Worker/model selection belongs to controller or user configuration rather than the project contract.
@@ -81,7 +81,8 @@ each project's concurrency limit. See [Project onboarding](project-onboarding.md
 
 ```text
 discovered → claimed → workspace-ready → running → verifying
-           → synchronized → verified → PR-open → CI → waiting-human/completed/failed
+           → synchronized → verified → PR-open → CI → merged/task-completed
+                                                    ↘ waiting-human/failed
 ```
 
 Every transition is idempotent and recorded with the task revision, base SHA, head SHA, workspace,
@@ -124,20 +125,21 @@ durable workspace/session/head evidence. It rejects worker crashes, timeouts, fa
 changes, verification failure, and a base that advances before the verified head is recorded. GitHub
 issue and native-dependency discovery works through the same plug-in boundary. A provider-neutral
 delivery coordinator now reconciles one draft pull request per verified branch, persists its identity
-and CI state, and rejects failed CI or non-draft publication. The live dogfood path includes a
-successful isolated Fable session and persisted draft pull request. Restart reconciliation now
-classifies durable identities before new claims, synchronizes advanced bases inside the isolated
-worktree, reruns required verification, and observes existing drafts without routine republishing.
-The bounded multi-project scheduler now reuses this joined path with explicit limits and a morning
-report. A supervised live scheduler pass reconciled the existing dogfood run without a new claim,
-worker invocation, branch, or pull request. The remaining gates before CLEAR are repeatable local
-service packaging and a second-project portability proof.
+and CI state, and rejects failed CI. Review-only projects reject non-draft publication. Protected
+automatic projects preflight strict required checks before claims, merge only the exact verified
+head after CI passes, and complete the source issue only after GitHub proves the merge. Restart
+reconciliation can recover that sequence without rebuilding a node. The live dogfood path includes
+a successful isolated Fable session and persisted draft pull request; the protected automatic path
+is covered deterministically and awaits its disposable live proof. The bounded multi-project
+scheduler reuses this joined path with explicit limits and a consolidated report.
 
 `run-once` is the first joined public surface. It refreshes `origin/<base>` before claiming and uses
 read-only `ls-remote` checks during execution/delivery, avoiding the stale-local-branch assumption.
 Dry run resolves the remote base and DAG without claims or external writes. Mutating passes reconcile
 existing runs before claiming from the same DAG snapshot. Repeated task revisions at delivery states
-poll the persisted draft and CI without relaunching a worker, push, or edit.
+poll the persisted pull request and CI without relaunching a worker, push, or edit. Under protected
+automatic delivery, completed node issues update the next task snapshot so dependents unlock on a
+later pass.
 
 Real workers remain fail-closed. The first Claude/Fable smoke test revealed that inherited MCP state
 can break a headless run and that `--max-budget-usd` is a stop condition rather than an enforceable

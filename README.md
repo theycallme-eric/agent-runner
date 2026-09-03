@@ -1,7 +1,7 @@
 # Agent Runner
 
 Local, project-agnostic control plane for running an approved dependency graph through isolated
-coding agents and verified draft pull requests.
+coding agents, independent verification, and policy-controlled pull requests.
 
 These tools live outside product repositories. Product repositories such as CLEAR remain independent;
 the boundary requires no Agent Runner package, service, instructions, or checked-in configuration.
@@ -24,11 +24,11 @@ explicitly with bounded `run-once`. Each mutating pass reconciles durable runs b
 work: it respects live leases, reclaims expired attempts, observes existing drafts by persisted
 identity, synchronizes advanced bases, and reruns required verification.
 A bounded scheduler and morning report are available behind an explicit `autopilot --enable` gate.
-The first version enforces global concurrency one and nothing runs in the background unless that
-command is deliberately launched. A short supervised autopilot proof reconciled the existing
-dogfood run without launching another worker or creating another claim. A real unattended task run
-has not yet been started. GitHub Actions runs the deterministic verification suite for pull requests
-and pushes to `main`.
+Nothing runs in the background unless that command is deliberately launched. Projects may retain
+review-only drafts with `merge: never`, or explicitly choose protected autonomous delivery with
+`merge: after-required-checks`. Autonomous delivery refuses to start unless the base branch has
+strict protection and at least one required check. It merges only the exact independently verified
+head, closes the source task, refreshes the graph, and allows newly unblocked work to proceed.
 
 Requirements preparation is an upstream responsibility. Agent Runner does not ingest raw designs,
 generate requirements, or invoke Requirements Builder. It begins only with an approved task source.
@@ -44,7 +44,8 @@ reporting or claiming work.
 | [Project onboarding](docs/project-onboarding.md) | Multi-project registry and task/DAG plug-in boundary |
 | [GitHub adapter](docs/github-adapter.md) | Issue selection, native dependencies, and normalization rules |
 | [Worker adapters](docs/worker-adapters.md) | Agent-neutral protocol and provider adapter boundary |
-| [Draft-PR delivery](docs/delivery.md) | Idempotent publication, persisted evidence, and CI states |
+| [Pull-request delivery](docs/delivery.md) | Idempotent publication, protected merging, evidence, and CI states |
+| [Automatic merge policy](docs/automatic-merge.md) | Safeguards and stop conditions for autonomous DAG draining |
 | [One-shot run](docs/run-once.md) | Joined dry-run and bounded execution flow |
 | [Reconciliation](docs/reconciliation.md) | Restart, advanced-base, PR, and CI convergence rules |
 | [Autopilot](docs/autopilot.md) | Bounded multi-project loop, stop conditions, and morning report |
@@ -66,8 +67,9 @@ npm run verify
 The suite currently proves that duplicate claims are rejected, expired attempts are bounded, live
 leases cannot be stolen, controller restarts preserve state, false worker success is rejected,
 advanced bases are merged and fully reverified, conflicts are restored and reported, protected paths
-wait for a human, changed/closed/merged drafts fail closed, pending CI is polled without republishing,
-and workers remain replaceable.
+wait for a human, review-only changed/closed/merged drafts fail closed, pending CI is polled without republishing,
+automatic merge requires strict protected checks and an exact head, source issues close only after a
+proved merge, and workers remain replaceable.
 
 ## Current CLI
 
@@ -122,8 +124,9 @@ default path is `~/.config/agent-runner/workers.yml`; `--profiles` or
 
 `run-once` is the explicit mutation boundary. `--dry-run` validates the same project, profile,
 remote base, and DAG without claiming, launching, pushing, or publishing. A real run defaults to one
-new claim; `--task issue-7` can target one ready task explicitly. It never merges. See
-[the one-shot run contract](docs/run-once.md).
+new claim; `--task issue-7` can target one ready task explicitly. Whether it stops at a verified
+draft or merges and completes the task is an explicit external project policy. See [the one-shot
+run contract](docs/run-once.md).
 
 `autopilot` repeats that same reconciler-first path across enabled registered projects. It requires
 `--enable`, defaults to global concurrency one, and accepts an explicit ceiling up to 16. Project
@@ -156,12 +159,17 @@ approved task graph
   → agent-runner ready <project-id>
   → agent-runner run-once <project-id> --dry-run
   → explicit run-once or autopilot --enable
-  → isolated workers, independent verification, and draft pull requests
+  → isolated workers and independent verification
+  → protected automatic node merges and refreshed dependencies
+  → completed graph, or one consolidated stop report
 ```
 
 The runner claims ready work, creates isolated workspaces, launches configured coding agents,
-verifies their output independently, and publishes reviewable pull requests. Automatic merging is
-not part of the first version.
+and verifies their output independently. With the protected automatic policy, it then merges safe
+nodes, completes their source issues, and continues through the DAG without requiring a person to
+approve every pull request. Protected paths and other explicit human gates still stop visibly. A
+project may target a dedicated build branch so final promotion or release remains the owner's one
+consolidated action.
 
 ## Relationship to CLEAR
 
@@ -173,5 +181,5 @@ should not receive Agent Runner code or required configuration files.
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License and public packaging are deferred; neither is required for the local workflow.
-- Next implementation gate: expand bounded concurrency and restart/status behavior through the
-  roadmap's safe parallel and unattended work package, then run one disposable end-to-end proof.
+- Next implementation gate: run the disposable end-to-end proof of protected autonomous merging,
+  then close any setup or recovery gaps revealed by that evidence.

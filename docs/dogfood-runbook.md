@@ -5,6 +5,10 @@ GitHub repository. Follow it in order; every step is bounded and fail-closed. Th
 the procedure only — actual run evidence belongs in [the implementation log](implementation-log.md),
 appended by the controller operator after each run, not asserted here in advance.
 
+This is the original review-only procedure for a contract using `merge: never`. It is not the
+autonomous DAG procedure; projects using `merge: after-required-checks` follow
+[Protected automatic merge](automatic-merge.md).
+
 ## Preconditions
 
 - The target issue is labeled `agent:task`, has no unresolved `blocked by` relationships, and its
@@ -51,7 +55,7 @@ Delivery starts only from a controller-owned `verified` run. The GitHub adapter 
 branch and creates or reconciles exactly one open draft pull request, with the branch as the
 idempotency key. A pull request that was marked ready is converted back to draft; a non-draft or
 mismatched pull request fails closed. Agent Runner never merges, enables auto-merge, or deletes
-branches — a human reviews and merges every dogfood pull request.
+branches under this review-only contract — a human reviews and merges every dogfood pull request.
 
 ## 6. Repeat reconciliation
 

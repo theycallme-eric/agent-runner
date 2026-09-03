@@ -28,6 +28,20 @@ execution: { concurrency: 1, attempts: 2, timeoutMinutes: 10 }
 delivery: { pullRequest: true, merge: never }
 `);
 
+const automaticMergeContract = parseProjectContract(`
+version: 1
+project: { id: fixture/delivery, baseBranch: main }
+tasks: { provider: fixture, dependencies: embedded-dag }
+workspace: { setup: [] }
+verification:
+  required: [npm test]
+  protectedPaths:
+    - pattern: .github/workflows/**
+      gate: human
+execution: { concurrency: 1, attempts: 2, timeoutMinutes: 10 }
+delivery: { pullRequest: true, merge: after-required-checks }
+`);
+
 const project: ProjectRegistration = {
   id: "fixture/delivery",
   rootPath: "/fixture/repository",
@@ -130,6 +144,41 @@ test("failed CI is persisted and cannot complete a run", async () => {
     assert.equal(result.run.state, "failed");
     assert.equal(result.run.failureReason, "ci-failed");
     assert.equal(context.runs.delivery(context.runId)?.ciStatus, "failed");
+  } finally {
+    context.runs.close();
+  }
+});
+
+test("automatically merges the exact verified head and completes its source task", async () => {
+  const context = setup();
+  context.request.contract = automaticMergeContract;
+  const publisher = fakePublisher(
+    async (request) => pullRequest(request, "104"),
+    async () => ({ status: "passed", evidence: ["required check passed"] }),
+  );
+  let mergeCalls = 0;
+  publisher.validateAutomaticMerge = async () => ["strict protected branch"];
+  publisher.mergeVerified = async (_request, pullRequest) => {
+    mergeCalls += 1;
+    return {
+      pullRequest: { ...pullRequest, draft: false, state: "merged" },
+      taskCompleted: true,
+      evidence: ["exact verified head merged", "source task completed"],
+    };
+  };
+  const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
+    now: tickingClock(),
+  });
+
+  try {
+    const result = await coordinator.deliver(context.request);
+
+    assert.equal(result.outcome, "completed");
+    assert.equal(result.run.state, "completed");
+    assert.equal(result.delivery?.draft, false);
+    assert.equal(mergeCalls, 1);
+    assert.equal(context.runs.delivery(context.runId)?.draft, false);
+    assert.equal(context.runs.delivery(context.runId)?.ciStatus, "passed");
   } finally {
     context.runs.close();
   }

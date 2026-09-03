@@ -36,10 +36,19 @@ test("rejects unknown fields so configuration typos fail closed", () => {
   assert.throws(() => parseProjectContract(withTypo), /execution has unknown fields: concurency/);
 });
 
-test("rejects projects that attempt to opt into automatic merging", () => {
+test("accepts explicit automatic merge after required checks", () => {
+  const autoMerge = fixture.replace("merge: never", "merge: after-required-checks");
+
+  assert.equal(parseProjectContract(autoMerge).delivery.merge, "after-required-checks");
+});
+
+test("rejects unknown automatic merge policies", () => {
   const autoMerge = fixture.replace("merge: never", "merge: always");
 
-  assert.throws(() => parseProjectContract(autoMerge), /delivery\.merge must be "never"/);
+  assert.throws(
+    () => parseProjectContract(autoMerge),
+    /delivery\.merge must be "never" or "after-required-checks"/,
+  );
 });
 
 test("accepts task providers and dependency adapters without changing the contract schema", () => {

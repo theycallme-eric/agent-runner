@@ -248,12 +248,16 @@ function stopFor(result: RunOnceResult, runs: RunStore): AutopilotStopReason | n
     result.reconciliation.some((item) => item.outcome === "waiting-human")
   ) return "human-gate";
   if (result.ok) return null;
-  const failed = [...result.claimed, ...result.reconciled].find((item) => item.failureReason);
+  const tasks = [...result.claimed, ...result.reconciled];
+  const failed = tasks.find((item) => item.failureReason);
   if (failed?.failureReason === "worker-profile-unavailable") return "worker-unavailable";
   if (failed) {
     const summary = runs.execution(failed.runId)?.workerSummary ?? "";
     if (/quota|rate limit|usage limit|capacity/i.test(summary)) return "quota-unavailable";
   }
+  const retryable = tasks.some((item) => item.delivery === "retryable-failure") ||
+    result.reconciliation.some((item) => item.outcome === "retryable-failure");
+  if (retryable) return null;
   return "run-failure";
 }
 

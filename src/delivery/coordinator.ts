@@ -112,19 +112,6 @@ export class DeliveryCoordinator {
       };
     }
 
-    const currentBaseSha = await this.#baseRevisions.inspect(
-      request.project.rootPath,
-      request.contract.project.baseBranch,
-    );
-    if (currentBaseSha !== initial.baseSha) {
-      return this.#terminalFailure(
-        initial,
-        "base-advanced-before-delivery",
-        at(),
-        { verifiedBaseSha: initial.baseSha, currentBaseSha },
-      );
-    }
-
     const publishRequest = draftRequest(
       request,
       execution.workspacePath,
@@ -162,7 +149,11 @@ export class DeliveryCoordinator {
       if (!observed) {
         return this.#terminalFailure(initial, "pull-request-missing", at(), existingDelivery);
       }
-      const observationFailure = validateExistingPullRequest(existingDelivery, observed);
+      const observationFailure = validateExistingPullRequest(
+        existingDelivery,
+        observed,
+        request.contract.delivery.merge,
+      );
       if (observationFailure) {
         return this.#terminalFailure(initial, observationFailure, at(), {
           existing: existingDelivery,
@@ -171,7 +162,9 @@ export class DeliveryCoordinator {
       }
       const identityAdvanced = existingDelivery.baseSha !== initial.baseSha ||
         existingDelivery.headSha !== initial.headSha;
-      if (identityAdvanced && observed.headSha === existingDelivery.headSha) {
+      if (observed.state === "merged") {
+        pullRequest = observed;
+      } else if (identityAdvanced && observed.headSha === existingDelivery.headSha) {
         try {
           pullRequest = await this.#publisher.updateDraft(publishRequest, observed);
         } catch (error) {
@@ -193,8 +186,27 @@ export class DeliveryCoordinator {
         return this.#retryableFailure(initial.id, "draft-publication-failed", error, at());
       }
     }
+    const currentBaseSha = await this.#baseRevisions.inspect(
+      request.project.rootPath,
+      request.contract.project.baseBranch,
+    );
+    if (currentBaseSha !== initial.baseSha && pullRequest.state !== "merged") {
+      const detail = { verifiedBaseSha: initial.baseSha, currentBaseSha };
+      return request.contract.delivery.merge === "after-required-checks"
+        ? this.#retryableFailure(
+            initial.id,
+            "base-advanced-before-automatic-merge",
+            new Error(JSON.stringify(detail)),
+            at(),
+          )
+        : this.#terminalFailure(initial, "base-advanced-before-delivery", at(), detail);
+    }
     try {
-      validatePullRequest(publishRequest, pullRequest);
+      validatePullRequest(
+        publishRequest,
+        pullRequest,
+        existingDelivery !== null && request.contract.delivery.merge === "after-required-checks",
+      );
     } catch (error) {
       return this.#terminalFailure(initial, "invalid-draft-pull-request", at(), error);
     }
@@ -254,8 +266,41 @@ export class DeliveryCoordinator {
       return { outcome: "failed", run, delivery, message: "Required CI failed" };
     }
     if (ci.status === "passed") {
+      if (request.contract.delivery.merge === "after-required-checks") {
+        if (!this.#publisher.mergeVerified) {
+          return this.#terminalFailure(run, "automatic-merge-unsupported", at());
+        }
+        let merged;
+        try {
+          merged = await this.#publisher.mergeVerified(publishRequest, pullRequest);
+          validateAutomaticMerge(publishRequest, merged);
+        } catch (error) {
+          return this.#retryableFailure(run.id, "automatic-merge-failed", error, at());
+        }
+        this.#runs.recordEvidence(run.id, "automatic-merge-completed", {
+          pullRequest: merged.pullRequest,
+          taskCompleted: merged.taskCompleted,
+          evidence: merged.evidence,
+        }, at());
+        this.#runs.recordDelivery(run.id, {
+          provider: this.#publisher.name,
+          externalId: merged.pullRequest.externalId,
+          url: merged.pullRequest.url,
+          branchName: merged.pullRequest.branchName,
+          baseBranch: merged.pullRequest.baseBranch,
+          baseSha: initial.baseSha,
+          headSha: merged.pullRequest.headSha,
+          draft: merged.pullRequest.draft,
+          ciStatus: "passed",
+        }, at());
+      }
       run = this.#runs.transition(run.id, "completed", at());
-      return { outcome: "completed", run, delivery, message: null };
+      return {
+        outcome: "completed",
+        run,
+        delivery: requireDelivery(this.#runs, run.id),
+        message: null,
+      };
     }
     return {
       outcome: "waiting-ci",
@@ -300,8 +345,14 @@ function validateRequest(run: RunRecord, request: DeliverTaskRequest): void {
   if (!["verified", "pr-open", "ci", "completed"].includes(run.state)) {
     throw new Error(`Delivery requires verified or published work, received ${run.state}`);
   }
-  if (!request.contract.delivery.pullRequest || request.contract.delivery.merge !== "never") {
-    throw new Error("Delivery requires draft pull requests with merge disabled");
+  if (!request.contract.delivery.pullRequest) {
+    throw new Error("Delivery requires pull requests");
+  }
+  if (
+    request.contract.delivery.merge === "after-required-checks" &&
+    (!request.contract.delivery.provider || !request.task.sourceId)
+  ) {
+    throw new Error("Automatic merge requires delivery and task-source identities");
   }
   if (
     run.projectId !== request.project.id ||
@@ -337,7 +388,9 @@ function draftRequest(
       "---",
       `Agent Runner task: ${request.task.id}`,
       `Agent Runner run: ${run.id}`,
-      "Automatic merge: disabled",
+      request.contract.delivery.merge === "after-required-checks"
+        ? "Automatic merge: enabled after required checks"
+        : "Automatic merge: disabled",
     ].join("\n"),
   };
 }
@@ -345,12 +398,13 @@ function draftRequest(
 function validatePullRequest(
   request: DraftPullRequestRequest,
   pullRequest: PullRequestSnapshot,
+  allowReadyOrMerged = false,
 ): void {
   if (
     pullRequest.externalId.trim() === "" ||
     pullRequest.url.trim() === "" ||
-    pullRequest.state !== "open" ||
-    !pullRequest.draft ||
+    (pullRequest.state !== "open" && !(allowReadyOrMerged && pullRequest.state === "merged")) ||
+    (!pullRequest.draft && !allowReadyOrMerged) ||
     pullRequest.branchName !== request.branchName ||
     pullRequest.baseBranch !== request.baseBranch ||
     pullRequest.headSha !== request.headSha
@@ -362,14 +416,15 @@ function validatePullRequest(
 function validateExistingPullRequest(
   persisted: RunDeliveryRecord,
   observed: PullRequestSnapshot,
+  mergePolicy: ProjectContract["delivery"]["merge"],
 ): string | null {
-  if (observed.state === "merged") {
+  if (observed.state === "merged" && mergePolicy === "never") {
     return "pull-request-merged";
   }
   if (observed.state === "closed") {
     return "pull-request-closed";
   }
-  if (!observed.draft) {
+  if (!observed.draft && mergePolicy === "never") {
     return "pull-request-not-draft";
   }
   if (
@@ -381,6 +436,30 @@ function validateExistingPullRequest(
     return "delivery-identity-drift";
   }
   return null;
+}
+
+function validateAutomaticMerge(
+  request: DraftPullRequestRequest,
+  result: {
+    pullRequest: PullRequestSnapshot;
+    taskCompleted: boolean;
+    evidence: string[];
+  },
+): void {
+  if (
+    result.pullRequest.state !== "merged" ||
+    result.pullRequest.draft ||
+    result.pullRequest.externalId.trim() === "" ||
+    result.pullRequest.branchName !== request.branchName ||
+    result.pullRequest.baseBranch !== request.baseBranch ||
+    result.pullRequest.headSha !== request.headSha ||
+    !result.taskCompleted ||
+    !Array.isArray(result.evidence) ||
+    result.evidence.length === 0 ||
+    result.evidence.some((entry) => typeof entry !== "string" || entry.trim() === "")
+  ) {
+    throw new Error("Publisher did not prove an exact verified merge and task completion");
+  }
 }
 
 function requireRun(runs: RunStore, runId: string): RunRecord {

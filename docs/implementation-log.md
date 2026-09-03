@@ -516,3 +516,23 @@ transcripts or secrets here.
 - The expanded cross-tool suite reproduced a one-second synthetic worker test timeout under process
   contention. Raised only the copied test harness allowance to five seconds; production worker
   timeouts and limits are unchanged.
+
+## 2026-09-03 — Protected autonomous DAG merging
+
+- Added the explicit external delivery policy `merge: after-required-checks`; existing
+  `merge: never` projects retain their review-only behavior.
+- Automatic delivery now fails before claims or model use unless the selected adapter supports the
+  policy. The GitHub adapter requires strict protection on the configured base branch with at least
+  one required check, and rechecks that policy immediately before merging.
+- After controller-owned verification and passing required CI, GitHub delivery marks the exact
+  persisted draft ready, squash-merges only when its head still matches the verified commit, then
+  closes the numeric source issue as completed. Merge and task-completion evidence are durable.
+- Restart reconciliation accepts only the exact runner-owned ready or merged pull request under the
+  automatic policy. It can finish task closure after a merge succeeded remotely, and refreshes the
+  base between completed sibling runs so remaining work must synchronize and reverify.
+- Bounded autopilot now retries transient delivery errors without another worker call until progress
+  resumes or its existing no-progress limit stops the session. Protected paths, terminal failures,
+  worker/quota failures, time and claim limits, and explicit human gates still stop visibly.
+- Evidence: TypeScript checks and all 90 deterministic tests pass, including strict-protection
+  refusal, exact-head merge, post-merge issue completion, recovery, and bounded retry behavior. A
+  disposable live autonomous proof remains the next gate; no product project was modified.

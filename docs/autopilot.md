@@ -33,12 +33,14 @@ The loop stops on the first applicable boundary:
 - configured consecutive passes with no claim or lifecycle/base progress;
 - a protected-path or other human gate;
 - missing worker profile or worker/quota unavailability;
-- any terminal or retryable run failure; or
+- any terminal run failure; or
 - no enabled registered projects.
 
 Idle passes wait for the configured poll interval rather than busy-looping. A process crash may omit
 the final report, but claims, leases, attempts, workspaces, worker evidence, draft identity, and CI
 remain in SQLite; the next launch begins with reconciliation instead of in-memory assumptions.
+Retryable delivery failures are retried without another worker call until progress resumes or the
+bounded no-progress limit stops the session.
 
 ## Morning report
 
@@ -48,12 +50,15 @@ state, attempt, worker/model/session, duration and cost estimate, pull-request U
 reason. Totals summarize completed, human-gated, and failed work plus estimated usage. The latest DAG
 snapshot lists ready, waiting, and blocked work per project.
 
-The scheduler has no merge capability. It emits no periodic notifications: the final report, a
-failure, or a required human gate is the actionable signal. Draft review and merge remain human
-actions.
+For a project configured with `merge: after-required-checks`, the same loop merges each safely
+verified node, completes its source issue, refreshes the DAG, and continues with newly unblocked
+nodes. For `merge: never`, drafts remain human actions. The scheduler emits no periodic
+notifications: the consolidated final report, a failure, or a required human gate is the actionable
+signal. See [Protected automatic merge](automatic-merge.md).
 
 ## First real run gate
 
 Before an overnight launch, run a supervised short invocation with one registered disposable or
 dogfood project, `--minutes` kept small, `--max-new-claims 1`, and the local profile/state paths made
-explicit. Review its report and drafts before increasing duration or registering a product project.
+explicit. Confirm the automatic policy preflight, merged task, issue completion, and newly unblocked
+DAG state before increasing duration or registering a product project.

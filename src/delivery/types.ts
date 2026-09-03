@@ -30,6 +30,12 @@ export interface CiSnapshot {
   evidence: string[];
 }
 
+export interface AutomaticMergeResult {
+  pullRequest: PullRequestSnapshot;
+  taskCompleted: boolean;
+  evidence: string[];
+}
+
 export interface PullRequestPublisher {
   readonly name: string;
   publishDraft(request: DraftPullRequestRequest): Promise<PullRequestSnapshot>;
@@ -42,4 +48,9 @@ export interface PullRequestPublisher {
     request: DraftPullRequestRequest,
     pullRequest: PullRequestSnapshot,
   ): Promise<CiSnapshot>;
+  validateAutomaticMerge?(repository: string, baseBranch: string): Promise<string[]>;
+  mergeVerified?(
+    request: DraftPullRequestRequest,
+    pullRequest: PullRequestSnapshot,
+  ): Promise<AutomaticMergeResult>;
 }

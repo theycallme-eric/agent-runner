@@ -231,6 +231,69 @@ test("passes an explicit parallel ceiling to the bounded run-once controller", a
   }
 });
 
+test("retries transient delivery failures until the bounded no-progress stop", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  let calls = 0;
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      calls += 1;
+      const result = resultFixture(request.projectId, "worker-a", false);
+      result.ok = false;
+      result.reconciled.push({
+        taskId: "TASK-RETRY",
+        runId: "run-retry",
+        state: "ci",
+        execution: "not-run",
+        worker: null,
+        workspacePath: "/workspaces/retry",
+        delivery: "retryable-failure",
+        pullRequestUrl: "https://example.invalid/pull/retry",
+        ciStatus: "passed",
+        failureReason: null,
+      });
+      result.reconciliation.push({
+        runId: "run-retry",
+        taskId: "TASK-RETRY",
+        initialState: "ci",
+        state: "ci",
+        execution: "not-run",
+        lease: "acquired",
+        outcome: "retryable-failure",
+        base: "current",
+        workspace: "present",
+        workerStatus: "succeeded",
+        workerSessionId: "session",
+        branchName: "agent/task-retry",
+        pullRequestUrl: "https://example.invalid/pull/retry",
+        pullRequestState: "open",
+        ciStatus: "passed",
+        failureReason: null,
+      });
+      return result;
+    },
+  }, { sleep: async () => undefined });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "retry",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 2,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+
+    assert.equal(result.stopReason, "no-progress");
+    assert.equal(calls, 4);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
 function projectsFixture(): ProjectRegistryStore {
   const projects = new ProjectRegistryStore();
   projects.register({

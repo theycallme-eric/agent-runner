@@ -27,6 +27,16 @@ execution: { concurrency: 1, attempts: 2, timeoutMinutes: 10 }
 delivery: { provider: fixture, pullRequest: true, merge: never }
 `);
 
+const automaticMergeContract = parseProjectContract(`
+version: 1
+project: { id: fixture/reconciliation, baseBranch: main }
+tasks: { provider: fixture, dependencies: fixture }
+workspace: { setup: [] }
+verification: { required: [npm test], protectedPaths: [] }
+execution: { concurrency: 1, attempts: 2, timeoutMinutes: 10 }
+delivery: { provider: fixture, pullRequest: true, merge: after-required-checks }
+`);
+
 const project: ProjectRegistration = {
   id: "fixture/reconciliation",
   rootPath: "/fixture/repository",
@@ -209,6 +219,50 @@ test("closed and merged pull requests fail instead of being recreated", async ()
   }
 });
 
+test("recovers an exact auto-merged pull request and completes its source task", async () => {
+  const context = fixture({ state: "ci", delivery: true });
+  const merged = { ...pullRequest("head-a"), draft: false, state: "merged" as const };
+  let completionCalls = 0;
+  const publisher: PullRequestPublisher = {
+    name: "fixture",
+    publishDraft: async () => {
+      throw new Error("must not publish");
+    },
+    inspectPullRequest: async () => merged,
+    updateDraft: async () => {
+      throw new Error("must not update");
+    },
+    checkCi: async () => ({ status: "passed", evidence: ["required check passed"] }),
+    validateAutomaticMerge: async () => ["strict protected branch"],
+    mergeVerified: async () => {
+      completionCalls += 1;
+      return {
+        pullRequest: merged,
+        taskCompleted: true,
+        evidence: ["merged head recovered", "source task completed"],
+      };
+    },
+  };
+  const controller = controllerFixture(
+    context.runs,
+    repositoryFixture(),
+    publisher,
+    passingCommands(),
+  );
+
+  try {
+    const result = await controller.reconcileProject(request("base-b", automaticMergeContract));
+
+    assert.equal(result[0]?.outcome, "completed");
+    assert.equal(result[0]?.pullRequestState, "merged");
+    assert.equal(context.runs.get(context.runId)?.state, "completed");
+    assert.equal(context.runs.delivery(context.runId)?.draft, false);
+    assert.equal(completionCalls, 1);
+  } finally {
+    context.runs.close();
+  }
+});
+
 test("an expired active run cannot exceed its attempt budget", async () => {
   const context = fixture({ state: "running", leaseExpiresAt: 100, maxAttempts: 1 });
   const controller = controllerFixture(context.runs, repositoryFixture(), null, passingCommands());
@@ -346,10 +400,10 @@ function pullRequest(headSha: string): PullRequestSnapshot {
   };
 }
 
-function request(currentBaseSha: string) {
+function request(currentBaseSha: string, selectedContract = contract) {
   return {
     project,
-    contract,
+    contract: selectedContract,
     inspection,
     currentBaseSha,
     controllerId: "reconciliation-controller",

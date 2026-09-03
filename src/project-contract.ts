@@ -31,7 +31,7 @@ export interface ProjectContract {
   delivery: {
     provider: string;
     pullRequest: boolean;
-    merge: "never";
+    merge: "never" | "after-required-checks";
   };
 }
 
@@ -77,7 +77,7 @@ export function parseProjectContract(source: string): ProjectContract {
 
   const delivery = objectAt(root.delivery, "delivery");
   allowedKeys(delivery, ["provider", "pullRequest", "merge"], ["pullRequest", "merge"], "delivery");
-  literal(delivery.merge, "never", "delivery.merge");
+  const merge = mergePolicyAt(delivery.merge, "delivery.merge");
 
   return {
     version: 1,
@@ -107,7 +107,7 @@ export function parseProjectContract(source: string): ProjectContract {
         ? pluginIdAt(tasks.provider, "tasks.provider")
         : pluginIdAt(delivery.provider, "delivery.provider"),
       pullRequest: booleanAt(delivery.pullRequest, "delivery.pullRequest"),
-      merge: "never",
+      merge,
     },
   };
 }
@@ -163,6 +163,13 @@ function literal(value: unknown, expected: string | number, path: string): void 
   if (value !== expected) {
     throw new Error(`${path} must be ${JSON.stringify(expected)}`);
   }
+}
+
+function mergePolicyAt(value: unknown, path: string): "never" | "after-required-checks" {
+  if (value !== "never" && value !== "after-required-checks") {
+    throw new Error(`${path} must be "never" or "after-required-checks"`);
+  }
+  return value;
 }
 
 function pluginIdAt(value: unknown, path: string): string {
