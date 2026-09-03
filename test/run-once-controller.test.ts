@@ -104,3 +104,103 @@ delivery: { provider: fixture, pullRequest: true, merge: never }
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("an unpinned required check fails the automatic-merge preflight before any claim", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-runner-unpinned-preflight-"));
+  const productPath = join(directory, "product");
+  const contractPath = join(directory, "runner", "project.yml");
+  mkdirSync(productPath);
+  mkdirSync(join(directory, "runner"));
+  writeFileSync(contractPath, `version: 1
+project: { id: fixture/unpinned, baseBranch: main }
+tasks: { provider: fixture, dependencies: fixture }
+workspace: { setup: [] }
+verification: { required: [node --test], protectedPaths: [] }
+execution: { concurrency: 1, attempts: 2, timeoutMinutes: 10 }
+delivery: { provider: fixture, pullRequest: true, merge: after-required-checks }
+`);
+
+  const projects = new ProjectRegistryStore();
+  const runs = new RunStore();
+  const providers = new TaskProviderRegistry();
+  const dependencies = new DependencyResolverRegistry();
+  const workers = new WorkerProfileRegistry();
+  const publishers = new PullRequestPublisherRegistry();
+  let validations = 0;
+
+  projects.register({
+    id: "fixture/unpinned",
+    rootPath: productPath,
+    contractPath,
+    workerProfile: "fixture",
+    contractVersion: 1,
+    now: 1,
+  });
+  providers.register({
+    name: "fixture",
+    listTasks: async () => [{
+      id: "TASK-READY",
+      sourceId: "1",
+      revision: "revision-a",
+      title: "Ready fixture",
+      prompt: "Do not run",
+      status: "pending",
+      dependencies: [],
+    }],
+  });
+  dependencies.register({ name: "fixture", resolve: async (tasks) => tasks });
+  workers.register("fixture", { name: "fixture", run: async () => {
+    throw new Error("worker must not run");
+  } });
+  publishers.register({
+    name: "fixture",
+    publishDraft: async () => { throw new Error("must not publish"); },
+    inspectPullRequest: async () => null,
+    updateDraft: async () => { throw new Error("must not update"); },
+    checkCi: async () => { throw new Error("must not inspect CI"); },
+    validateAutomaticMerge: async () => {
+      validations += 1;
+      throw new Error(
+        "Automatic merge requires every required check on main to be provided by a specific " +
+          "GitHub App. Configure a reporting application for: legacy-status",
+      );
+    },
+    observeRequiredChecks: async () => { throw new Error("must not observe checks"); },
+    mergeVerified: async () => { throw new Error("must not merge"); },
+  });
+
+  const unused = async () => { throw new Error("unused fixture dependency"); };
+  const controller = new RunOnceController(
+    projects,
+    runs,
+    new ProjectPlanner(runs, providers, dependencies),
+    workers,
+    { create: unused },
+    { resolveRef: unused, snapshot: unused, commit: unused, synchronize: unused },
+    { inspect: async () => "a".repeat(40), refresh: async () => "a".repeat(40) },
+    publishers,
+    { run: unused },
+  );
+
+  const request = {
+    projectId: "fixture/unpinned",
+    controllerId: "fixture-controller",
+    leaseDurationMs: 1_000,
+    maxClaims: 1,
+    dryRun: false,
+    targetTaskId: null,
+  };
+
+  try {
+    await assert.rejects(controller.run(request), /specific GitHub App/);
+    await assert.rejects(controller.run({ ...request, dryRun: true }), /legacy-status/);
+
+    assert.equal(validations, 2);
+    assert.deepEqual(runs.listProject("fixture/unpinned"), []);
+  } finally {
+    runs.close();
+    projects.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+

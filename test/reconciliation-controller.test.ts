@@ -235,11 +235,16 @@ test("recovers an exact auto-merged pull request and completes its source task",
     checkCi: async () => ({
       status: "passed" as const,
       evidence: ["node-tests: pass"],
-      checks: [{ name: "node-tests", bucket: "pass" as const }],
+      checks: [{ name: "node-tests", bucket: "pass" as const, appId: 15_368, headSha: "head-a" }],
     }),
     validateAutomaticMerge: async () => ({
       evidence: ["strict protected branch"],
-      requiredChecks: ["node-tests"],
+      requiredChecks: [{ context: "node-tests", appId: 15_368 }],
+    }),
+    observeRequiredChecks: async () => ({
+      status: "passed" as const,
+      evidence: ["node-tests: pass"],
+      checks: [{ name: "node-tests", bucket: "pass" as const, appId: 15_368, headSha: "head-a" }],
     }),
     mergeVerified: async () => {
       completionCalls += 1;

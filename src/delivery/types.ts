@@ -30,6 +30,16 @@ export type CiCheckBucket = "pass" | "fail" | "pending" | "skipping" | "cancel";
 export interface CiCheck {
   name: string;
   bucket: CiCheckBucket;
+  /** Identifier of the GitHub App that reported the result, or null when the source is unproven. */
+  appId: number | null;
+  /** Commit the result was reported against, or null when the observation does not carry one. */
+  headSha: string | null;
+}
+
+/** One context branch protection requires, with the reporting application it is pinned to. */
+export interface RequiredCheck {
+  context: string;
+  appId: number | null;
 }
 
 export interface CiSnapshot {
@@ -40,7 +50,7 @@ export interface CiSnapshot {
 
 export interface AutomaticMergeValidation {
   evidence: string[];
-  requiredChecks: string[];
+  requiredChecks: RequiredCheck[];
 }
 
 export interface AutomaticMergeResult {
@@ -65,6 +75,14 @@ export interface PullRequestPublisher {
     repository: string,
     baseBranch: string,
   ): Promise<AutomaticMergeValidation>;
+  /**
+   * Observe the required contexts with enough identity to prove the reporting source and the head
+   * commit. Used instead of `checkCi` wherever automatic merging is enabled.
+   */
+  observeRequiredChecks?(
+    request: DraftPullRequestRequest,
+    requiredChecks: RequiredCheck[],
+  ): Promise<CiSnapshot>;
   mergeVerified?(
     request: DraftPullRequestRequest,
     pullRequest: PullRequestSnapshot,

@@ -8,6 +8,7 @@ import type { DraftPullRequestRequest } from "../src/delivery/types.js";
 import {
   GitHubPullRequestPublisher,
   parseBranchProtection,
+  parseCheckRuns,
   parseChecks,
   parseIssue,
   parsePullRequest,
@@ -23,7 +24,7 @@ test("normalizes draft pull requests and required check buckets", () => {
       isDraft: true,
       headRefName: "agent-runner/task-42",
       baseRefName: "main",
-      headRefOid: "head-a",
+      headRefOid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
     },
   ]));
   assert.deepEqual(pullRequests, [{
@@ -32,7 +33,7 @@ test("normalizes draft pull requests and required check buckets", () => {
     draft: true,
     branchName: "agent-runner/task-42",
     baseBranch: "main",
-    headSha: "head-a",
+    headSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
     state: "open",
   }]);
 
@@ -42,7 +43,7 @@ test("normalizes draft pull requests and required check buckets", () => {
     draft: true,
     state: "closed",
     merged_at: "2026-08-31T00:00:00Z",
-    head: { ref: "agent-runner/task-42", sha: "head-a" },
+    head: { ref: "agent-runner/task-42", sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" },
     base: { ref: "main", sha: "base-a" },
   })).state, "merged");
 
@@ -83,7 +84,14 @@ test("requires strict branch protection with named checks and a real issue sourc
       strict: true,
       checks: [{ context: "node-tests", app_id: 15368 }],
     },
-  })), { strict: true, requiredChecks: ["node-tests"], enforceAdmins: false });
+  })), {
+    strict: true,
+    requiredChecks: [{ context: "node-tests", appId: 15368 }],
+    enforceAdmins: false,
+  });
+  assert.deepEqual(parseBranchProtection(JSON.stringify({
+    required_status_checks: { strict: true, contexts: ["node-tests"] },
+  })).requiredChecks, [{ context: "node-tests", appId: null }]);
   assert.throws(
     () => parseBranchProtection(JSON.stringify({ required_status_checks: null })),
     /no required status checks/,
@@ -164,16 +172,16 @@ test("merges only the exact verified head on a protected branch and closes its t
 
     assert.deepEqual(protection.evidence, [
       "Protected base branch: main",
-      "Required checks: node-tests",
+      "Required checks: node-tests (app 15368)",
       "Administrators cannot bypass required checks",
     ]);
-    assert.deepEqual(protection.requiredChecks, ["node-tests"]);
+    assert.deepEqual(protection.requiredChecks, [{ context: "node-tests", appId: NODE_TESTS_APP }]);
     assert.equal(result.pullRequest.state, "merged");
     assert.equal(result.pullRequest.draft, false);
-    assert.equal(result.pullRequest.headSha, "head-a");
+    assert.equal(result.pullRequest.headSha, "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678");
     assert.equal(result.taskCompleted, true);
     assert.match(log, /^gh ready$/m);
-    assert.match(log, /^gh merge head-a$/m);
+    assert.match(log, /^gh merge a1b2c3d4e5f60718293a4b5c6d7e8f9012345678$/m);
     assert.match(log, /^gh close issue 1$/m);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -249,14 +257,17 @@ test("requires branch protection to bind administrators before automatic merge",
 
 test("refuses to merge unless every required context reported a passing check", async () => {
   const partial = publisherFixture("agent-runner-github-partial-checks-", {
-    requiredContexts: ["node-tests", "verify"],
-    checks: [{ name: "verify", bucket: "pass", link: "" }],
+    requiredChecks: [
+      { context: "node-tests", appId: NODE_TESTS_APP },
+      { context: "verify", appId: NODE_TESTS_APP },
+    ],
+    checkRuns: [checkRun({ name: "verify" })],
   });
   const skipped = publisherFixture("agent-runner-github-skipped-checks-", {
-    checks: [{ name: "node-tests", bucket: "skipping", link: "" }],
+    checkRuns: [checkRun({ conclusion: "skipped" })],
   });
   const cancelled = publisherFixture("agent-runner-github-cancelled-checks-", {
-    checks: [{ name: "node-tests", bucket: "cancel", link: "" }],
+    checkRuns: [checkRun({ conclusion: "cancelled" })],
   });
   try {
     const draft = await partial.publisher.publishDraft(partial.request);
@@ -288,16 +299,19 @@ test("refuses to merge unless every required context reported a passing check", 
 
 test("re-observes required checks after the draft becomes ready and before merging", async () => {
   const fixture = publisherFixture("agent-runner-github-post-ready-checks-", {
-    checksBeforeReady: [],
+    checkRunsBeforeReady: [],
   });
   try {
     const draft = await fixture.publisher.publishDraft(fixture.request);
-    const beforeReady = await fixture.publisher.checkCi(fixture.request, draft);
+    const beforeReady = await fixture.publisher.observeRequiredChecks(
+      fixture.request,
+      [{ context: "node-tests", appId: NODE_TESTS_APP }],
+    );
     const result = await fixture.publisher.mergeVerified(fixture.request, draft);
     const lines = fixture.log().trimEnd().split("\n");
     const ready = lines.indexOf("gh ready");
     const merge = lines.findIndex((line) => line.startsWith("gh merge"));
-    const observed = lines.findIndex((line, index) => line === "gh checks" && index > ready);
+    const observed = lines.findIndex((line, index) => line === "gh check-runs" && index > ready);
 
     assert.equal(beforeReady.status, "none");
     assert.equal(result.pullRequest.state, "merged");
@@ -311,8 +325,8 @@ test("re-observes required checks after the draft becomes ready and before mergi
 
 test("refuses to merge when required checks are still pending after the draft becomes ready", async () => {
   const fixture = publisherFixture("agent-runner-github-post-ready-pending-", {
-    checksBeforeReady: [],
-    checks: [{ name: "node-tests", bucket: "pending", link: "" }],
+    checkRunsBeforeReady: [],
+    checkRuns: [checkRun({ status: "in_progress", conclusion: null })],
   });
   try {
     const draft = await fixture.publisher.publishDraft(fixture.request);
@@ -323,6 +337,113 @@ test("refuses to merge when required checks are still pending after the draft be
     assert.doesNotMatch(fixture.log(), /^gh merge/m);
   } finally {
     fixture.cleanup();
+  }
+});
+
+test("reads the reporting application and head commit off every check run", () => {
+  const parsed = parseCheckRuns(JSON.stringify({
+    total_count: 2,
+    check_runs: [
+      {
+        name: "node-tests",
+        head_sha: VERIFIED_HEAD,
+        status: "completed",
+        conclusion: "success",
+        app: { id: NODE_TESTS_APP },
+      },
+      { name: "lint", head_sha: VERIFIED_HEAD, status: "queued", conclusion: null, app: null },
+    ],
+  }));
+
+  assert.equal(parsed.complete, true);
+  assert.deepEqual(parsed.rows, [
+    { name: "node-tests", bucket: "pass", appId: NODE_TESTS_APP, headSha: VERIFIED_HEAD },
+    { name: "lint", bucket: "pending", appId: null, headSha: VERIFIED_HEAD },
+  ]);
+  assert.equal(
+    parseCheckRuns(JSON.stringify({ total_count: 7, check_runs: [] })).complete,
+    false,
+  );
+});
+
+test("refuses automatic merge when a required context accepts a result from any application", async () => {
+  const unpinned = publisherFixture("agent-runner-github-unpinned-context-", {
+    requiredChecks: [
+      { context: "node-tests", appId: NODE_TESTS_APP },
+      { context: "legacy-status", appId: null },
+    ],
+  });
+  try {
+    await assert.rejects(
+      unpinned.publisher.validateAutomaticMerge("example/repo", "main"),
+      /legacy-status/,
+    );
+    await assert.rejects(
+      unpinned.publisher.validateAutomaticMerge("example/repo", "main"),
+      /specific GitHub App/,
+    );
+    assert.doesNotMatch(unpinned.log(), /^gh merge/m);
+  } finally {
+    unpinned.cleanup();
+  }
+});
+
+test("a passing check from the wrong application cannot merge", async () => {
+  const impostor = publisherFixture("agent-runner-github-wrong-app-", {
+    checkRuns: [checkRun({ app: { id: 99 } })],
+  });
+  const anonymous = publisherFixture("agent-runner-github-no-app-", {
+    checkRuns: [checkRun({ app: null })],
+  });
+  try {
+    const draft = await impostor.publisher.publishDraft(impostor.request);
+    await assert.rejects(
+      impostor.publisher.mergeVerified(impostor.request, draft),
+      /node-tests \(reported by application 99, not by required application 15368\)/,
+    );
+    assert.doesNotMatch(impostor.log(), /^gh merge/m);
+
+    const anonymousDraft = await anonymous.publisher.publishDraft(anonymous.request);
+    await assert.rejects(
+      anonymous.publisher.mergeVerified(anonymous.request, anonymousDraft),
+      /node-tests \(reported by an unidentified source/,
+    );
+    assert.doesNotMatch(anonymous.log(), /^gh merge/m);
+  } finally {
+    impostor.cleanup();
+    anonymous.cleanup();
+  }
+});
+
+test("a passing check from the right application on another head cannot merge", async () => {
+  const stale = publisherFixture("agent-runner-github-wrong-head-", {
+    checkRuns: [checkRun({ head_sha: "9".repeat(40) })],
+  });
+  try {
+    const draft = await stale.publisher.publishDraft(stale.request);
+    await assert.rejects(
+      stale.publisher.mergeVerified(stale.request, draft),
+      /not on the verified head/,
+    );
+    assert.doesNotMatch(stale.log(), /^gh merge/m);
+  } finally {
+    stale.cleanup();
+  }
+});
+
+test("an incomplete check-run listing cannot prove a required context", async () => {
+  const truncated = publisherFixture("agent-runner-github-truncated-checks-", {
+    checkRunTotal: 250,
+  });
+  try {
+    const draft = await truncated.publisher.publishDraft(truncated.request);
+    await assert.rejects(
+      truncated.publisher.mergeVerified(truncated.request, draft),
+      /unverifiable/,
+    );
+    assert.doesNotMatch(truncated.log(), /^gh merge/m);
+  } finally {
+    truncated.cleanup();
   }
 });
 
@@ -337,18 +458,43 @@ function fixtureRequest(directory: string): DraftPullRequestRequest {
     branchName: "agent-runner/task-01-a1-run",
     baseBranch: "main",
     baseSha: "base-a",
-    headSha: "head-a",
+    headSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
     title: "Implement fixture",
     body: "Fixture body",
   };
 }
 
+interface FakeCheckRun {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  head_sha: string;
+  app: { id: number } | null;
+}
+
 interface FakeGhOptions {
   strict?: boolean;
   enforceAdmins?: boolean | null;
-  requiredContexts?: string[];
+  requiredChecks?: Array<{ context: string; appId: number | null }>;
   checks?: Array<{ name: string; bucket: string; link: string }>;
   checksBeforeReady?: Array<{ name: string; bucket: string; link: string }>;
+  checkRuns?: FakeCheckRun[];
+  checkRunsBeforeReady?: FakeCheckRun[];
+  checkRunTotal?: number;
+}
+
+const NODE_TESTS_APP = 15368;
+const VERIFIED_HEAD = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+
+function checkRun(overrides: Partial<FakeCheckRun> = {}): FakeCheckRun {
+  return {
+    name: "node-tests",
+    status: "completed",
+    conclusion: "success",
+    head_sha: VERIFIED_HEAD,
+    app: { id: NODE_TESTS_APP },
+    ...overrides,
+  };
 }
 
 function fakeGhScript(
@@ -360,9 +506,12 @@ function fakeGhScript(
   const settings = {
     strict: options.strict ?? true,
     enforceAdmins: options.enforceAdmins === undefined ? true : options.enforceAdmins,
-    requiredContexts: options.requiredContexts ?? ["node-tests"],
+    requiredChecks: options.requiredChecks ?? [{ context: "node-tests", appId: NODE_TESTS_APP }],
     checks: options.checks ?? [{ name: "node-tests", bucket: "pass", link: "" }],
     checksBeforeReady: options.checksBeforeReady ?? null,
+    checkRuns: options.checkRuns ?? [checkRun()],
+    checkRunsBeforeReady: options.checkRunsBeforeReady ?? null,
+    checkRunTotal: options.checkRunTotal ?? null,
   };
   return `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -387,7 +536,7 @@ if (args[0] === "pr" && args[1] === "list") {
     mergedAt: null,
     headRefName: head,
     baseRefName: base,
-    headRefOid: "head-a"
+    headRefOid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
   }]));
   process.stdout.write("https://github.com/example/repo/pull/7\\n");
 } else if (args[0] === "pr" && args[1] === "edit") {
@@ -413,12 +562,26 @@ if (args[0] === "pr" && args[1] === "list") {
   process.stdout.write(JSON.stringify(rows));
 } else if (args[0] === "api") {
   const endpoint = args.find(value => value.startsWith("repos/"));
-  if (endpoint && endpoint.endsWith("/protection")) {
+  if (endpoint && endpoint.includes("/check-runs")) {
+    const readyAlready = /^gh ready$/m.test(calls());
+    append("gh check-runs");
+    const runs = settings.checkRunsBeforeReady !== null && !readyAlready
+      ? settings.checkRunsBeforeReady
+      : settings.checkRuns;
+    process.stdout.write(JSON.stringify({
+      total_count: settings.checkRunTotal === null ? runs.length : settings.checkRunTotal,
+      check_runs: runs
+    }));
+  } else if (endpoint && endpoint.endsWith("/protection")) {
     append("gh protection");
     const protection = {
       required_status_checks: {
         strict: settings.strict,
-        checks: settings.requiredContexts.map(context => ({ context, app_id: 15368 }))
+        checks: settings.requiredChecks.map(entry => (
+          entry.appId === null
+            ? { context: entry.context }
+            : { context: entry.context, app_id: entry.appId }
+        ))
       }
     };
     if (settings.enforceAdmins !== null) {
@@ -496,7 +659,7 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 const callsPath = ${JSON.stringify(callsPath)};
 if (args[0] === "rev-parse" && args[1] === "HEAD") {
-  process.stdout.write("head-a\\n");
+  process.stdout.write("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678\\n");
 } else if (args[0] === "push") {
   fs.appendFileSync(callsPath, "git push\\n");
 } else {

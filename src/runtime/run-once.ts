@@ -123,7 +123,11 @@ export class RunOnceController {
       ? this.#publishers.get(contract.delivery.provider)
       : null;
     if (contract.delivery.merge === "after-required-checks") {
-      if (!publisher?.validateAutomaticMerge || !publisher.mergeVerified) {
+      if (
+        !publisher?.validateAutomaticMerge ||
+        !publisher.observeRequiredChecks ||
+        !publisher.mergeVerified
+      ) {
         throw new Error(
           `Delivery provider ${contract.delivery.provider} does not support automatic merging`,
         );

@@ -6,12 +6,12 @@ import type { ProjectRegistration } from "../projects/types.js";
 import type { TaskNode } from "../tasks/types.js";
 import type { WorkspaceRepository } from "../workspaces/git-repository.js";
 import type { BaseRevisionProvider } from "../workspaces/base-revision.js";
+import { reconcileRequiredChecks } from "./required-checks.js";
 import type {
-  CiCheck,
-  CiCheckBucket,
   DraftPullRequestRequest,
   PullRequestPublisher,
   PullRequestSnapshot,
+  RequiredCheck,
 } from "./types.js";
 
 export const DEFAULT_MAX_CI_WAIT_MINUTES = 30;
@@ -258,11 +258,15 @@ export class DeliveryCoordinator {
     const automaticMerge = request.contract.delivery.merge === "after-required-checks";
     if (
       automaticMerge &&
-      (!this.#publisher.validateAutomaticMerge || !this.#publisher.mergeVerified)
+      (
+        !this.#publisher.validateAutomaticMerge ||
+        !this.#publisher.observeRequiredChecks ||
+        !this.#publisher.mergeVerified
+      )
     ) {
       return this.#terminalFailure(run, "automatic-merge-unsupported", at());
     }
-    let requiredChecks: string[] = [];
+    let requiredChecks: RequiredCheck[] = [];
     if (automaticMerge && this.#publisher.validateAutomaticMerge) {
       try {
         const validation = await this.#publisher.validateAutomaticMerge(
@@ -277,7 +281,9 @@ export class DeliveryCoordinator {
 
     let ci;
     try {
-      ci = await this.#publisher.checkCi(publishRequest, pullRequest);
+      ci = automaticMerge && this.#publisher.observeRequiredChecks
+        ? await this.#publisher.observeRequiredChecks(publishRequest, requiredChecks)
+        : await this.#publisher.checkCi(publishRequest, pullRequest);
     } catch (error) {
       return this.#retryableFailure(run.id, "ci-observation-failed", error, at());
     }
@@ -292,7 +298,11 @@ export class DeliveryCoordinator {
       if (ci.status === "passed" && ci.checks === undefined) {
         return this.#terminalFailure(run, "required-checks-unreported", at(), { requiredChecks });
       }
-      const reconciled = reconcileRequiredChecks(requiredChecks, ci.checks ?? []);
+      const reconciled = reconcileRequiredChecks(
+        requiredChecks,
+        ci.checks ?? [],
+        pullRequest.headSha,
+      );
       waitingContexts = reconciled.waiting;
       failedContexts = reconciled.failed;
     }
@@ -427,33 +437,6 @@ function ciWaitBoundMs(request: DeliverTaskRequest): number {
     request.maxCiWaitMinutes ??
     DEFAULT_MAX_CI_WAIT_MINUTES;
   return minutes * 60_000;
-}
-
-function reconcileRequiredChecks(
-  requiredChecks: string[],
-  observed: CiCheck[],
-): { waiting: string[]; failed: string[] } {
-  const buckets = new Map<string, CiCheckBucket>();
-  for (const check of observed) {
-    const existing = buckets.get(check.name);
-    if (existing === undefined || existing === "pass") {
-      buckets.set(check.name, check.bucket);
-    }
-  }
-  const waiting: string[] = [];
-  const failed: string[] = [];
-  for (const context of requiredChecks) {
-    const bucket = buckets.get(context);
-    if (bucket === "pass") {
-      continue;
-    }
-    if (bucket === "fail" || bucket === "cancel") {
-      failed.push(`${context} (${bucket})`);
-    } else {
-      waiting.push(`${context} (${bucket ?? "not reported"})`);
-    }
-  }
-  return { waiting, failed };
 }
 
 function validateRequest(run: RunRecord, request: DeliverTaskRequest): void {

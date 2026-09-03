@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { reconcileRequiredChecks } from "../delivery/required-checks.js";
 import type {
   AutomaticMergeResult,
   AutomaticMergeValidation,
@@ -10,12 +11,15 @@ import type {
   DraftPullRequestRequest,
   PullRequestPublisher,
   PullRequestSnapshot,
+  RequiredCheck,
 } from "../delivery/types.js";
 
 const execFileAsync = promisify(execFile);
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const MAX_OUTPUT_BYTES = 5_000_000;
+const COMMIT_SHA = /^[0-9a-f]{7,40}$/;
+const CHECK_RUN_PAGE_SIZE = 100;
 
 interface RawPullRequest {
   number?: unknown;
@@ -40,6 +44,14 @@ interface RawCheck {
   name?: unknown;
   bucket?: unknown;
   link?: unknown;
+}
+
+interface RawCheckRun {
+  name?: unknown;
+  head_sha?: unknown;
+  status?: unknown;
+  conclusion?: unknown;
+  app?: unknown;
 }
 
 interface RawBranchProtection {
@@ -242,13 +254,52 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
           "every token that can merge, including administrators",
       );
     }
+    const unpinned = protection.requiredChecks
+      .filter((check) => check.appId === null)
+      .map((check) => check.context);
+    if (unpinned.length > 0) {
+      throw new Error(
+        `Automatic merge requires every required check on ${baseBranch} to be provided by a ` +
+          "specific GitHub App, because an unpinned context accepts a result from any source. " +
+          `Configure a reporting application for: ${unpinned.join(", ")}`,
+      );
+    }
     return {
       evidence: [
         `Protected base branch: ${baseBranch}`,
-        `Required checks: ${protection.requiredChecks.join(", ")}`,
+        `Required checks: ${describeRequiredChecks(protection.requiredChecks)}`,
         "Administrators cannot bypass required checks",
       ],
       requiredChecks: protection.requiredChecks,
+    };
+  }
+
+  async observeRequiredChecks(
+    request: DraftPullRequestRequest,
+    requiredChecks: RequiredCheck[],
+  ): Promise<CiSnapshot> {
+    return (await this.#observeRequired(request, requiredChecks)).snapshot;
+  }
+
+  async #observeRequired(
+    request: DraftPullRequestRequest,
+    requiredChecks: RequiredCheck[],
+  ): Promise<{ snapshot: CiSnapshot; unproven: string[] }> {
+    validateRequest(request);
+    if (!COMMIT_SHA.test(request.headSha)) {
+      throw new Error(`Required checks need a commit head, received ${request.headSha}`);
+    }
+    const output = await this.#gh([
+      "api",
+      `repos/${request.repository}/commits/${request.headSha}/check-runs` +
+        `?filter=latest&per_page=${CHECK_RUN_PAGE_SIZE}`,
+      "--header",
+      "X-GitHub-Api-Version: 2026-03-10",
+    ]);
+    const parsed = parseCheckRuns(output);
+    return {
+      snapshot: checkRunSnapshot(parsed, requiredChecks, request.headSha),
+      unproven: unprovenRequiredChecks(parsed, requiredChecks, request.headSha),
     };
   }
 
@@ -285,21 +336,18 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
         }
         observed = ready;
       }
-      const observedChecks = await this.checkCi(request, observed);
-      const unsatisfied = unsatisfiedRequiredChecks(
-        validation.requiredChecks,
-        observedChecks.checks ?? [],
-      );
+      const observed_checks = await this.#observeRequired(request, validation.requiredChecks);
+      const unsatisfied = observed_checks.unproven;
       if (unsatisfied.length > 0) {
         throw new Error(
-          "Automatic merge requires a passing check for every required context on " +
-            `${request.baseBranch}; unsatisfied after the pull request became ready: ` +
-            unsatisfied.join(", "),
+          "Automatic merge requires a passing check from the configured application on the exact " +
+            `verified head for every required context on ${request.baseBranch}; unsatisfied after ` +
+            `the pull request became ready: ${unsatisfied.join(", ")}`,
         );
       }
       evidence.push(
-        "Required checks re-observed as passing before merge: " +
-          validation.requiredChecks.join(", "),
+        `Required checks proved on head ${request.headSha} before merge: ` +
+          describeRequiredChecks(validation.requiredChecks),
       );
       await this.#gh([
         "pr",
@@ -419,20 +467,132 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
   }
 }
 
-export function unsatisfiedRequiredChecks(
-  requiredChecks: string[],
-  observed: CiCheck[],
-): string[] {
-  const buckets = new Map<string, CiCheckBucket>();
-  for (const check of observed) {
-    const existing = buckets.get(check.name);
-    if (existing === undefined || existing === "pass") {
-      buckets.set(check.name, check.bucket);
-    }
-  }
+export function describeRequiredChecks(requiredChecks: RequiredCheck[]): string {
   return requiredChecks
-    .filter((context) => buckets.get(context) !== "pass")
-    .map((context) => `${context} (${buckets.get(context) ?? "not reported"})`);
+    .map((check) => `${check.context} (app ${check.appId ?? "unpinned"})`)
+    .join(", ");
+}
+
+export function parseCheckRuns(source: string): { rows: CiCheck[]; complete: boolean } {
+  const value = JSON.parse(source) as unknown;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("GitHub check-run response must be an object");
+  }
+  const raw = value as { total_count?: unknown; check_runs?: unknown };
+  if (!Array.isArray(raw.check_runs)) {
+    throw new Error("GitHub check-run response must carry a check_runs array");
+  }
+  const rows = raw.check_runs.map((entry, index): CiCheck => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error(`check_runs[${index}] must be an object`);
+    }
+    const run = entry as RawCheckRun;
+    return {
+      name: stringValue(run.name, `check_runs[${index}].name`),
+      bucket: checkRunBucket(run, index),
+      appId: checkRunApplication(run.app, `check_runs[${index}].app`),
+      headSha: stringValue(run.head_sha, `check_runs[${index}].head_sha`),
+    };
+  });
+  const total = raw.total_count === undefined
+    ? rows.length
+    : positiveIntegerOrZero(raw.total_count, "total_count");
+  return { rows, complete: total <= rows.length };
+}
+
+/**
+ * Every required context this reading cannot prove, with the reason. An incomplete listing cannot
+ * prove anything, because the check run that would contradict a pass may be on a page we never saw.
+ */
+export function unprovenRequiredChecks(
+  parsed: { rows: CiCheck[]; complete: boolean },
+  requiredChecks: RequiredCheck[],
+  headSha: string,
+): string[] {
+  const reconciled = reconcileRequiredChecks(requiredChecks, parsed.rows, headSha);
+  const unverifiable = parsed.complete
+    ? []
+    : reconciled.satisfied.map((context) =>
+      `${context} (unverifiable: only ${parsed.rows.length} check runs were listed for ${headSha})`
+    );
+  return [...reconciled.failed, ...reconciled.waiting, ...unverifiable];
+}
+
+export function checkRunSnapshot(
+  parsed: { rows: CiCheck[]; complete: boolean },
+  requiredChecks: RequiredCheck[],
+  headSha: string,
+): CiSnapshot {
+  const reconciled = reconcileRequiredChecks(requiredChecks, parsed.rows, headSha);
+  const unproven = unprovenRequiredChecks(parsed, requiredChecks, headSha);
+  const status: CiSnapshot["status"] = reconciled.failed.length > 0
+    ? "failed"
+    : unproven.length === 0
+      ? "passed"
+      : parsed.rows.length === 0
+        ? "none"
+        : "pending";
+  return {
+    status,
+    evidence: [
+      ...parsed.rows.map((row) =>
+        `${row.name}: ${row.bucket} (app ${row.appId ?? "unidentified"}, head ${row.headSha ?? "unidentified"})`
+      ),
+      ...reconciled.satisfied
+        .filter((context) => !unproven.some((entry) => entry.startsWith(`${context} (`)))
+        .map((context) => `required ${context}: proved`),
+      ...unproven.map((entry) => `required ${entry}: unproven`),
+    ],
+    checks: parsed.rows,
+  };
+}
+
+function checkRunBucket(run: RawCheckRun, index: number): CiCheckBucket {
+  const status = stringValue(run.status, `check_runs[${index}].status`);
+  if (!["queued", "in_progress", "completed", "waiting", "requested", "pending"].includes(status)) {
+    throw new Error(`Unsupported GitHub check-run status: ${status}`);
+  }
+  if (status !== "completed") {
+    return "pending";
+  }
+  const conclusion = run.conclusion === null || run.conclusion === undefined
+    ? "none"
+    : stringValue(run.conclusion, `check_runs[${index}].conclusion`);
+  switch (conclusion) {
+    case "success":
+      return "pass";
+    case "cancelled":
+      return "cancel";
+    case "skipped":
+    case "neutral":
+      return "skipping";
+    default:
+      return "fail";
+  }
+}
+
+function checkRunApplication(value: unknown, path: string): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${path} must be an object`);
+  }
+  const id = (value as { id?: unknown }).id;
+  if (id === undefined || id === null) {
+    return null;
+  }
+  if (!Number.isInteger(id) || (id as number) < 1) {
+    throw new Error(`${path}.id must be a positive integer`);
+  }
+  return id as number;
+}
+
+function positiveIntegerOrZero(value: unknown, path: string): number {
+  if (!Number.isInteger(value) || (value as number) < 0) {
+    throw new Error(`${path} must be a non-negative integer`);
+  }
+  return value as number;
 }
 
 export function recoverChecksOutput(error: unknown): string | null {
@@ -537,13 +697,18 @@ export function parseChecks(source: string): CiSnapshot {
   return {
     status,
     evidence: checks.map((check) => `${check.name}: ${check.bucket}${check.link ? ` (${check.link})` : ""}`),
-    checks: checks.map((check): CiCheck => ({ name: check.name, bucket: check.bucket })),
+    checks: checks.map((check): CiCheck => ({
+      name: check.name,
+      bucket: check.bucket,
+      appId: null,
+      headSha: null,
+    })),
   };
 }
 
 export function parseBranchProtection(source: string): {
   strict: boolean;
-  requiredChecks: string[];
+  requiredChecks: RequiredCheck[];
   enforceAdmins: boolean;
 } {
   const value = JSON.parse(source) as unknown;
@@ -563,25 +728,42 @@ export function parseBranchProtection(source: string): {
     checks?: unknown;
     contexts?: unknown;
   };
-  const names: string[] = [];
+  const contexts = new Map<string, number | null>();
   if (Array.isArray(required.checks)) {
     for (const [index, entry] of required.checks.entries()) {
       if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
         throw new Error(`required_status_checks.checks[${index}] must be an object`);
       }
-      const context = (entry as { context?: unknown }).context;
-      names.push(stringValue(context, `required_status_checks.checks[${index}].context`));
+      const check = entry as { context?: unknown; app_id?: unknown };
+      const context = stringValue(check.context, `required_status_checks.checks[${index}].context`);
+      contexts.set(
+        context,
+        applicationId(check.app_id, `required_status_checks.checks[${index}].app_id`),
+      );
     }
   } else if (Array.isArray(required.contexts)) {
-    names.push(...required.contexts.map((entry, index) =>
-      stringValue(entry, `required_status_checks.contexts[${index}]`)
-    ));
+    // The legacy contexts array names a context without pinning it to a reporting application.
+    for (const [index, entry] of required.contexts.entries()) {
+      contexts.set(stringValue(entry, `required_status_checks.contexts[${index}]`), null);
+    }
   }
   return {
     strict: booleanValue(required.strict, "required_status_checks.strict"),
-    requiredChecks: [...new Set(names)].sort(),
+    requiredChecks: [...contexts.entries()]
+      .map(([context, appId]) => ({ context, appId }))
+      .sort((left, right) => left.context.localeCompare(right.context)),
     enforceAdmins: parseEnforceAdmins(raw.enforce_admins),
   };
+}
+
+function applicationId(value: unknown, path: string): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    throw new Error(`${path} must be a positive integer or null`);
+  }
+  return value as number;
 }
 
 function parseEnforceAdmins(value: unknown): boolean {

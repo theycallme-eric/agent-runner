@@ -157,14 +157,16 @@ test("automatically merges the exact verified head and completes its source task
     async () => ({
       status: "passed",
       evidence: ["node-tests: pass"],
-      checks: [{ name: "node-tests", bucket: "pass" as const }],
+      checks: [nodeTests("pass")],
     }),
   );
   let mergeCalls = 0;
   publisher.validateAutomaticMerge = async () => ({
     evidence: ["strict protected branch"],
-    requiredChecks: ["node-tests"],
+    requiredChecks: [{ context: "node-tests", appId: NODE_TESTS_APP }],
   });
+  publisher.observeRequiredChecks = async (request) =>
+    publisher.checkCi(request, pullRequest(request, "observed"));
   publisher.mergeVerified = async (_request, pullRequest) => {
     mergeCalls += 1;
     return {
@@ -199,14 +201,19 @@ test("an unreported required context downgrades an apparent pass to waiting", as
     async () => ({
       status: "passed",
       evidence: ["verify: pass"],
-      checks: [{ name: "verify", bucket: "pass" as const }],
+      checks: [check("verify", "pass")],
     }),
   );
   let mergeCalls = 0;
   publisher.validateAutomaticMerge = async () => ({
     evidence: ["strict protected branch"],
-    requiredChecks: ["node-tests", "verify"],
+    requiredChecks: [
+      { context: "node-tests", appId: NODE_TESTS_APP },
+      { context: "verify", appId: NODE_TESTS_APP },
+    ],
   });
+  publisher.observeRequiredChecks = async (request) =>
+    publisher.checkCi(request, pullRequest(request, "observed"));
   publisher.mergeVerified = async () => {
     mergeCalls += 1;
     throw new Error("automatic merge must not be attempted");
@@ -243,8 +250,10 @@ test("an apparent pass without check rows refuses to merge under the automatic p
   let mergeCalls = 0;
   publisher.validateAutomaticMerge = async () => ({
     evidence: ["strict protected branch"],
-    requiredChecks: ["node-tests"],
+    requiredChecks: [{ context: "node-tests", appId: NODE_TESTS_APP }],
   });
+  publisher.observeRequiredChecks = async (request) =>
+    publisher.checkCi(request, pullRequest(request, "observed"));
   publisher.mergeVerified = async () => {
     mergeCalls += 1;
     throw new Error("automatic merge must not be attempted");
@@ -271,7 +280,7 @@ test("a bounded CI wait expires without failing or transitioning the run", async
   const pending: CiSnapshot = {
     status: "pending",
     evidence: ["node-tests: pending"],
-    checks: [{ name: "node-tests", bucket: "pending" }],
+    checks: [nodeTests("pending")],
   };
   const checks: CiSnapshot[] = [
     pending,
@@ -279,7 +288,7 @@ test("a bounded CI wait expires without failing or transitioning the run", async
     {
       status: "passed",
       evidence: ["node-tests: pass"],
-      checks: [{ name: "node-tests", bucket: "pass" }],
+      checks: [nodeTests("pass")],
     },
   ];
   const publisher = fakePublisher(async (request) => pullRequest(request, "107"), async () => {
@@ -289,8 +298,10 @@ test("a bounded CI wait expires without failing or transitioning the run", async
   });
   publisher.validateAutomaticMerge = async () => ({
     evidence: ["strict protected branch"],
-    requiredChecks: ["node-tests"],
+    requiredChecks: [{ context: "node-tests", appId: NODE_TESTS_APP }],
   });
+  publisher.observeRequiredChecks = async (request) =>
+    publisher.checkCi(request, pullRequest(request, "observed"));
   publisher.mergeVerified = async (_request, observed) => ({
     pullRequest: { ...observed, draft: false, state: "merged" as const },
     taskCompleted: true,
@@ -487,6 +498,28 @@ function fakePublisher(
     },
     checkCi,
   };
+}
+
+const NODE_TESTS_APP = 15_368;
+
+function check(
+  name: string,
+  bucket: "pass" | "fail" | "pending" | "skipping" | "cancel",
+  overrides: { appId?: number | null; headSha?: string | null } = {},
+) {
+  return {
+    name,
+    bucket,
+    appId: overrides.appId === undefined ? NODE_TESTS_APP : overrides.appId,
+    headSha: overrides.headSha === undefined ? "head-a" : overrides.headSha,
+  };
+}
+
+function nodeTests(
+  bucket: "pass" | "fail" | "pending" | "skipping" | "cancel",
+  overrides: { appId?: number | null; headSha?: string | null } = {},
+) {
+  return check("node-tests", bucket, overrides);
 }
 
 function pullRequest(request: DraftPullRequestRequest, externalId: string): PullRequestSnapshot {
