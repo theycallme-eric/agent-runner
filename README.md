@@ -29,6 +29,9 @@ review-only drafts with `merge: never`, or explicitly choose protected autonomou
 `merge: after-required-checks`. Autonomous delivery refuses to start unless the base branch has
 strict protection and at least one required check. It merges only the exact independently verified
 head, closes the source task, refreshes the graph, and allows newly unblocked work to proceed.
+A five-node disposable GitHub proof has now exercised that complete path through parallel roots,
+parallel middle work, final dependency unlocking, and a `completed` report without per-node human
+merges.
 
 Requirements preparation is an upstream responsibility. Agent Runner does not ingest raw designs,
 generate requirements, or invoke Requirements Builder. It begins only with an approved task source.
@@ -181,5 +184,5 @@ should not receive Agent Runner code or required configuration files.
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License and public packaging are deferred; neither is required for the local workflow.
-- Next implementation gate: run the disposable end-to-end proof of protected autonomous merging,
-  then close any setup or recovery gaps revealed by that evidence.
+- Next implementation gate: use the proven flow on an owner-selected real project, or first add only
+  the operating convenience needed to make that project setup clear and repeatable.

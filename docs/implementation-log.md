@@ -533,6 +533,25 @@ transcripts or secrets here.
 - Bounded autopilot now retries transient delivery errors without another worker call until progress
   resumes or its existing no-progress limit stops the session. Protected paths, terminal failures,
   worker/quota failures, time and claim limits, and explicit human gates still stop visibly.
-- Evidence: TypeScript checks and all 90 deterministic tests pass, including strict-protection
-  refusal, exact-head merge, post-merge issue completion, recovery, and bounded retry behavior. A
-  disposable live autonomous proof remains the next gate; no product project was modified.
+- The first live autonomous attempt safely exposed that autopilot changed its controller identity on
+  every polling pass, so the next pass respected the prior five-minute lease and could not reconcile
+  green pull requests. Autopilot now retains one controller identity for the invocation; the
+  superseded attempt stopped without a merge or duplicate worker call.
+- The resumed attempt automatically merged roots TASK-001 and TASK-003. It then exposed a second
+  ordering gap: reconciliation merged one root after the pass's original base snapshot, and the next
+  task was claimed from that stale snapshot. Independent base verification failed TASK-002 before
+  publication. `run-once` now refreshes the base after reconciliation and before any new claim.
+- The final correction makes a reached new-claim ceiling stop additional claims while continuing to
+  reconcile in-flight work. A fully drained graph now reports `completed` instead of generic
+  no-progress. Both behaviors have focused regression coverage.
+- A fresh continuation from the two completed root issues ran TASK-002 and TASK-004 in parallel,
+  automatically merged PRs #10 and #11 after required checks, closed their issues, unlocked TASK-005,
+  and automatically merged PR #12. GitHub ended with PRs #8 through #12 merged, issues #1 through #5
+  closed as completed, strict `node-tests` protection still enabled, and remote `main` at
+  `dfb9a78aa3decce0b239dfab9e496cdadb80129e`.
+- Successful autonomous worker estimates totaled $1.29827005; the safely rejected stale-base
+  TASK-002 attempt added $0.29154715. These are Claude subscription usage estimates, not API billing.
+- Evidence: TypeScript checks and all 93 deterministic tests pass, including strict-protection
+  refusal, stable invocation leases, post-reconciliation base refresh, claim-ceiling draining,
+  exact-head merge, post-merge issue completion, recovery, and completed-DAG reporting. No real
+  product project was modified.

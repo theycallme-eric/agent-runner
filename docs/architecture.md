@@ -129,9 +129,10 @@ and CI state, and rejects failed CI. Review-only projects reject non-draft publi
 automatic projects preflight strict required checks before claims, merge only the exact verified
 head after CI passes, and complete the source issue only after GitHub proves the merge. Restart
 reconciliation can recover that sequence without rebuilding a node. The live dogfood path includes
-a successful isolated Fable session and persisted draft pull request; the protected automatic path
-is covered deterministically and awaits its disposable live proof. The bounded multi-project
-scheduler reuses this joined path with explicit limits and a consolidated report.
+a successful isolated Fable session and persisted draft pull request. A disposable five-node proof
+also completed the protected automatic path through parallel branches, base advancement,
+reverification, issue completion, dependency unlocking, and a final completed report. The bounded
+multi-project scheduler reuses this joined path with explicit limits and a consolidated report.
 
 `run-once` is the first joined public surface. It refreshes `origin/<base>` before claiming and uses
 read-only `ls-remote` checks during execution/delivery, avoiding the stale-local-branch assumption.

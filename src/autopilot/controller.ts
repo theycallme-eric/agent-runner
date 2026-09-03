@@ -7,6 +7,7 @@ import type {
 } from "../runtime/run-once.js";
 
 export type AutopilotStopReason =
+  | "completed"
   | "deadline"
   | "max-new-claims"
   | "no-progress"
@@ -128,14 +129,10 @@ export class AutopilotController {
       let passClaims = 0;
       let progress = false;
       for (const project of enabledProjects) {
-        const remainingClaims = request.maxNewClaims - totalNewClaims;
-        if (remainingClaims <= 0) {
-          stopReason = "max-new-claims";
-          break;
-        }
+        const remainingClaims = Math.max(0, request.maxNewClaims - totalNewClaims);
         const runRequest: RunOnceRequest = {
           projectId: project.id,
-          controllerId: `${request.controllerId}-p${passNumber}`,
+          controllerId: request.controllerId,
           leaseDurationMs: request.leaseDurationMs,
           maxClaims: Math.min(request.globalConcurrency, remainingClaims),
           dryRun: false,
@@ -153,10 +150,6 @@ export class AutopilotController {
           stopReason = stop;
           break;
         }
-        if (totalNewClaims >= request.maxNewClaims) {
-          stopReason = "max-new-claims";
-          break;
-        }
       }
       passes.push({
         number: passNumber,
@@ -166,6 +159,28 @@ export class AutopilotController {
         progress,
       });
       if (stopReason !== null) break;
+      const inFlight = enabledProjects.some((project) => this.#runs.listProject(project.id).some((run) =>
+        !["completed", "failed", "waiting-human"].includes(run.state)
+      ));
+      if (
+        projectResults.length === enabledProjects.length &&
+        projectResults.every((result) =>
+          result.ready.length === 0 &&
+          result.waiting.length === 0 &&
+          result.blocked.length === 0
+        ) &&
+        !inFlight
+      ) {
+        stopReason = "completed";
+        break;
+      }
+      if (
+        totalNewClaims >= request.maxNewClaims &&
+        !inFlight
+      ) {
+        stopReason = "max-new-claims";
+        break;
+      }
       noProgressPasses = progress ? 0 : noProgressPasses + 1;
       if (noProgressPasses >= request.maxNoProgressPasses) {
         stopReason = "no-progress";

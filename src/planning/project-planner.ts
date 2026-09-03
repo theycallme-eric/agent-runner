@@ -148,8 +148,8 @@ function validateRequest(request: PlanProjectRequest): void {
   if (!Number.isInteger(request.leaseDurationMs) || request.leaseDurationMs < 1) {
     throw new Error("leaseDurationMs must be a positive integer");
   }
-  if (request.maxClaims !== undefined && (!Number.isInteger(request.maxClaims) || request.maxClaims < 1)) {
-    throw new Error("maxClaims must be a positive integer");
+  if (request.maxClaims !== undefined && (!Number.isInteger(request.maxClaims) || request.maxClaims < 0)) {
+    throw new Error("maxClaims must be a non-negative integer");
   }
   if (request.taskIds !== undefined) {
     if (request.taskIds.length === 0 || request.taskIds.some((taskId) => taskId.trim() === "")) {

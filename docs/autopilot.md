@@ -20,6 +20,10 @@ ceiling, remaining invocation claim budget, available project capacity, and the 
 `execution.concurrency` wins. The SQLite claim transaction still prevents duplicate tasks and
 enforces per-project capacity across controller connections.
 
+Reaching the invocation's new-claim ceiling prevents additional claims but does not abandon work
+already claimed by that invocation. Autopilot continues reconciliation-only passes until those runs
+complete, stop for another reason, or hit an existing time/no-progress boundary.
+
 Projects are processed one at a time, so the explicit global ceiling bounds simultaneous workers in
 this controller without multiplying capacity across projects or worker profiles. A later scheduler
 can add cross-project parallelism only with an atomic shared provider-capacity ledger.
@@ -28,6 +32,7 @@ can add cross-project parallelism only with an atomic shared provider-capacity l
 
 The loop stops on the first applicable boundary:
 
+- every enabled project's DAG is complete and no run remains in flight;
 - wall-clock deadline;
 - maximum new claims for the whole invocation;
 - configured consecutive passes with no claim or lifecycle/base progress;

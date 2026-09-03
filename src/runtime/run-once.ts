@@ -121,7 +121,7 @@ export class RunOnceController {
       }
       await publisher.validateAutomaticMerge(project.id, contract.project.baseBranch);
     }
-    const baseSha = request.dryRun
+    let baseSha = request.dryRun
       ? await this.#baseRevisions.inspect(project.rootPath, contract.project.baseBranch)
       : await this.#baseRevisions.refresh(project.rootPath, contract.project.baseBranch);
     if (request.dryRun) {
@@ -166,6 +166,10 @@ export class RunOnceController {
       controllerId: request.controllerId,
       leaseDurationMs: request.leaseDurationMs,
     });
+    baseSha = await this.#baseRevisions.refresh(
+      project.rootPath,
+      contract.project.baseBranch,
+    );
     const plan = this.#planner.claimInspected({
       project,
       contract,
@@ -309,8 +313,8 @@ function validateRequest(request: RunOnceRequest): void {
   if (!Number.isInteger(request.leaseDurationMs) || request.leaseDurationMs < 1) {
     throw new Error("leaseDurationMs must be a positive integer");
   }
-  if (!Number.isInteger(request.maxClaims) || request.maxClaims < 1) {
-    throw new Error("maxClaims must be a positive integer");
+  if (!Number.isInteger(request.maxClaims) || request.maxClaims < 0) {
+    throw new Error("maxClaims must be a non-negative integer");
   }
   if (request.targetTaskId !== null && request.targetTaskId.trim() === "") {
     throw new Error("targetTaskId must be null or non-empty");

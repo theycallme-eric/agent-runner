@@ -55,6 +55,7 @@ test("runs two projects and worker profiles sequentially, then stops after bound
       "fixture/two",
     ]);
     assert.ok(calls.every((call) => call.maxClaims === 1 && call.targetTaskId === null));
+    assert.ok(calls.every((call) => call.controllerId === "overnight"));
     assert.deepEqual(
       result.passes[0]?.projects.map((entry) => entry.workerProfile),
       ["worker-a", "worker-b"],
@@ -91,6 +92,42 @@ test("requires explicit enablement and bounded positive global concurrency", asy
       controller.run({ ...base, enabled: true, globalConcurrency: 17 }),
       /integer from 1 to 16/,
     );
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("reports a fully drained DAG as completed", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  let calls = 0;
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      calls += 1;
+      const result = resultFixture(request.projectId, "worker-a", false);
+      result.ready = [];
+      result.completed = ["TASK-DONE"];
+      result.duplicateTaskIds = [];
+      return result;
+    },
+  });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "completed",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+
+    assert.equal(result.stopReason, "completed");
+    assert.equal(result.passes.length, 1);
+    assert.equal(calls, 2);
   } finally {
     runs.close();
     projects.close();
@@ -153,7 +190,7 @@ test("honors both the deadline and maximum-new-claim ceiling", async () => {
   const controller = new AutopilotController(projects, runs, {
     run: async (request) => {
       calls += 1;
-      return resultFixture(request.projectId, "worker-a", true);
+      return resultFixture(request.projectId, "worker-a", request.maxClaims > 0);
     },
   }, { now: () => now, sleep: async () => undefined });
   const base = {
@@ -174,7 +211,79 @@ test("honors both the deadline and maximum-new-claim ceiling", async () => {
     const bounded = await controller.run({ ...base, deadlineAt: 1_000 });
     assert.equal(bounded.stopReason, "max-new-claims");
     assert.equal(bounded.totalNewClaims, 1);
-    assert.equal(calls, 1);
+    assert.equal(calls, 2);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("stops new claims at the ceiling but drains already claimed work", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  const requests: RunOnceRequest[] = [];
+  const claimed = runs.claim({
+    projectId: "fixture/one",
+    taskId: "TASK-IN-FLIGHT",
+    revision: "one",
+    baseSha: "base-a",
+    workerId: "overnight",
+    now: 1,
+    leaseDurationMs: 10_000,
+    maxAttempts: 2,
+  });
+  let active = runs.transition(claimed.run.id, "workspace-ready", 2);
+  active = runs.transition(active.id, "running", 3);
+  active = runs.transition(active.id, "verifying", 4, { headSha: "head-a" });
+  active = runs.transition(active.id, "verified", 5, { headSha: "head-a" });
+  active = runs.transition(active.id, "pr-open", 6);
+  active = runs.transition(active.id, "ci", 7);
+
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      requests.push(request);
+      const result = resultFixture(request.projectId, "worker-a", requests.length === 1);
+      if (requests.length === 3) {
+        runs.transition(active.id, "completed", 8);
+        result.reconciliation.push({
+          runId: active.id,
+          taskId: "TASK-IN-FLIGHT",
+          initialState: "ci",
+          state: "completed",
+          execution: "not-run",
+          lease: "acquired",
+          outcome: "completed",
+          base: "current",
+          workspace: "present",
+          workerStatus: "succeeded",
+          workerSessionId: "session",
+          branchName: "agent/task-in-flight",
+          pullRequestUrl: "https://example.invalid/pull/in-flight",
+          pullRequestState: "merged",
+          ciStatus: "passed",
+          failureReason: null,
+        });
+      }
+      return result;
+    },
+  }, { sleep: async () => undefined });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "overnight",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 1,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+
+    assert.equal(result.stopReason, "max-new-claims");
+    assert.equal(result.passes.length, 2);
+    assert.deepEqual(requests.map((request) => request.maxClaims), [1, 0, 0, 0]);
+    assert.equal(runs.get(active.id)?.state, "completed");
   } finally {
     runs.close();
     projects.close();
