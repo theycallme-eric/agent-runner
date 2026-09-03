@@ -69,7 +69,7 @@ test("runs two projects and worker profiles sequentially, then stops after bound
   }
 });
 
-test("requires explicit enablement and global concurrency one", async () => {
+test("requires explicit enablement and bounded positive global concurrency", async () => {
   const projects = projectsFixture();
   const runs = new RunStore();
   const controller = new AutopilotController(projects, runs, {
@@ -83,13 +83,13 @@ test("requires explicit enablement and global concurrency one", async () => {
     maxNewClaims: 1,
     maxNoProgressPasses: 1,
     pollIntervalMs: 1,
-    globalConcurrency: 1 as const,
+    globalConcurrency: 1,
   };
   try {
     await assert.rejects(controller.run(base), /explicit enable flag/);
     await assert.rejects(
-      controller.run({ ...base, enabled: true, globalConcurrency: 2 as 1 }),
-      /global concurrency one/,
+      controller.run({ ...base, enabled: true, globalConcurrency: 17 }),
+      /integer from 1 to 16/,
     );
   } finally {
     runs.close();
@@ -163,7 +163,7 @@ test("honors both the deadline and maximum-new-claim ceiling", async () => {
     maxNewClaims: 1,
     maxNoProgressPasses: 2,
     pollIntervalMs: 1,
-    globalConcurrency: 1 as const,
+    globalConcurrency: 1,
   };
   try {
     const deadline = await controller.run({ ...base, deadlineAt: 100 });
@@ -175,6 +175,56 @@ test("honors both the deadline and maximum-new-claim ceiling", async () => {
     assert.equal(bounded.stopReason, "max-new-claims");
     assert.equal(bounded.totalNewClaims, 1);
     assert.equal(calls, 1);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("passes an explicit parallel ceiling to the bounded run-once controller", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  const requests: RunOnceRequest[] = [];
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      requests.push(request);
+      const result = resultFixture(request.projectId, "worker-a", false);
+      result.reconciliation.push({
+        runId: "stop-after-capacity-check",
+        taskId: "TASK-GATE",
+        initialState: "verified",
+        state: "waiting-human",
+        execution: "not-run",
+        lease: "acquired",
+        outcome: "waiting-human",
+        base: "current",
+        workspace: "present",
+        workerStatus: "succeeded",
+        workerSessionId: "session",
+        branchName: "agent/task",
+        pullRequestUrl: null,
+        pullRequestState: "none",
+        ciStatus: null,
+        failureReason: null,
+      });
+      return result;
+    },
+  });
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "parallel",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 2,
+      pollIntervalMs: 1,
+      globalConcurrency: 3,
+    });
+
+    assert.equal(result.stopReason, "human-gate");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.maxClaims, 3);
   } finally {
     runs.close();
     projects.close();

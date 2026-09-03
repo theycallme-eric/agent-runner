@@ -329,6 +329,7 @@ async function autopilotCommand(argumentsList: string[]): Promise<void> {
   const maxNewClaims = positiveOption(argumentsList, "--max-new-claims", 10);
   const maxNoProgressPasses = positiveOption(argumentsList, "--no-progress-passes", 3);
   const pollIntervalMs = positiveOption(argumentsList, "--poll-seconds", 60) * 1_000;
+  const globalConcurrency = positiveOption(argumentsList, "--concurrency", 1);
   const leaseDurationMs = positiveOption(argumentsList, "--lease-seconds", 300) * 1_000;
   const controllerId = option(argumentsList, "--controller") ?? `${hostname()}-${process.pid}`;
   const ghExecutable = process.env.AGENT_RUNNER_GH_BIN ?? "gh";
@@ -399,7 +400,7 @@ async function autopilotCommand(argumentsList: string[]): Promise<void> {
       maxNewClaims,
       maxNoProgressPasses,
       pollIntervalMs,
-      globalConcurrency: 1,
+      globalConcurrency,
     });
     print(result);
     if (["run-failure", "worker-unavailable", "quota-unavailable"].includes(result.stopReason)) {
@@ -470,7 +471,8 @@ function usage(): void {
     [--state <database>] [--profiles <worker-config>] [--workspace-root <directory>]
     [--controller <id>] [--lease-seconds <seconds>]
   agent-runner autopilot --enable [--minutes <count>] [--max-new-claims <count>]
-    [--no-progress-passes <count>] [--poll-seconds <seconds>] [--state <database>]
+    [--concurrency <count>] [--no-progress-passes <count>] [--poll-seconds <seconds>]
+    [--state <database>]
     [--profiles <worker-config>] [--workspace-root <directory>] [--controller <id>]
     [--lease-seconds <seconds>]`);
   process.exitCode = 2;

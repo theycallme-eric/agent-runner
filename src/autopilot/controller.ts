@@ -24,7 +24,7 @@ export interface AutopilotRequest {
   maxNewClaims: number;
   maxNoProgressPasses: number;
   pollIntervalMs: number;
-  globalConcurrency: 1;
+  globalConcurrency: number;
 }
 
 export interface AutopilotPass {
@@ -272,8 +272,12 @@ function validateRequest(request: AutopilotRequest): void {
   if (request.controllerId.trim() === "") {
     throw new Error("controllerId must be non-empty");
   }
-  if (request.globalConcurrency !== 1) {
-    throw new Error("The first unattended version requires global concurrency one");
+  if (
+    !Number.isInteger(request.globalConcurrency) ||
+    request.globalConcurrency < 1 ||
+    request.globalConcurrency > 16
+  ) {
+    throw new Error("globalConcurrency must be an integer from 1 to 16");
   }
 }
 

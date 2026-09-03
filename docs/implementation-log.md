@@ -485,3 +485,18 @@ transcripts or secrets here.
 - Added deterministic handoff, drift, injection, and task-verification tests. The Agent Runner suite
   now has 81 passing tests, and the root verifier passes a synthetic handoff from Requirements
   Builder's producer through Agent Runner's consumer without a runtime dependency between tools.
+
+## 2026-09-02 — Expose bounded parallel DAG execution
+
+- Replaced the unattended controller's hard-coded single-worker limit with an explicit global
+  `--concurrency` ceiling that defaults to one and is bounded from 1 through 16.
+- Kept projects in stable sequential order so capacity is not multiplied across projects or shared
+  worker profiles. Within a project, the existing run-once controller executes only concurrently
+  claimed DAG roots, while the lower project contract limit and atomic SQLite claim rules remain in
+  force.
+- Retained invocation claim, deadline, no-progress, attempts, worker timeout/cost, human-gate, and
+  failure stop conditions. The controller produces one final durable report rather than periodic
+  noise.
+- Added deterministic coverage that the explicit ceiling reaches run-once and that invalid capacity
+  is rejected. Cross-project parallelism remains intentionally out of scope until a shared atomic
+  provider-capacity ledger exists.

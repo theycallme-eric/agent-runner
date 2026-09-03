@@ -8,13 +8,21 @@ reconciles durable work first, then claims through the same controller used inte
 agent-runner autopilot --enable \
   --minutes 480 \
   --max-new-claims 3 \
+  --concurrency 2 \
   --no-progress-passes 3 \
   --poll-seconds 60
 ```
 
-Without `--enable`, the command fails before any project pass. The first unattended version fixes
-global concurrency at one. Projects run in stable registry order; each receives at most one new
-claim per pass, while its own contract still bounds attempts, worker time, and verification.
+Without `--enable`, the command fails before any project pass. Global concurrency defaults to one
+and can be explicitly raised to at most 16. Projects remain in stable registry order; within a
+project, only dependency-independent ready tasks can be claimed together. The lower of the global
+ceiling, remaining invocation claim budget, available project capacity, and the project's own
+`execution.concurrency` wins. The SQLite claim transaction still prevents duplicate tasks and
+enforces per-project capacity across controller connections.
+
+Projects are processed one at a time, so the explicit global ceiling bounds simultaneous workers in
+this controller without multiplying capacity across projects or worker profiles. A later scheduler
+can add cross-project parallelism only with an atomic shared provider-capacity ledger.
 
 ## Stop conditions
 
@@ -40,7 +48,9 @@ state, attempt, worker/model/session, duration and cost estimate, pull-request U
 reason. Totals summarize completed, human-gated, and failed work plus estimated usage. The latest DAG
 snapshot lists ready, waiting, and blocked work per project.
 
-The scheduler has no merge capability. Draft review and merge remain human actions.
+The scheduler has no merge capability. It emits no periodic notifications: the final report, a
+failure, or a required human gate is the actionable signal. Draft review and merge remain human
+actions.
 
 ## First real run gate
 

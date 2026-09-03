@@ -84,7 +84,7 @@ node dist/src/cli.js status
 node dist/src/cli.js ready <project-id>
 node dist/src/cli.js profiles --profiles /path/to/workers.yml
 node dist/src/cli.js run-once <project-id> --dry-run --profiles /path/to/workers.yml
-node dist/src/cli.js autopilot --enable --minutes 480 --max-new-claims 3
+node dist/src/cli.js autopilot --enable --minutes 480 --max-new-claims 3 --concurrency 2
 ```
 
 `register` requires the product repository and external contract as separate explicit paths. It
@@ -123,8 +123,10 @@ new claim; `--task issue-7` can target one ready task explicitly. It never merge
 [the one-shot run contract](docs/run-once.md).
 
 `autopilot` repeats that same reconciler-first path across enabled registered projects. It requires
-`--enable`, starts at global concurrency one, and stops at explicit time, claim, no-progress, human,
-worker/quota, or failure boundaries. See [the autopilot contract](docs/autopilot.md).
+`--enable`, defaults to global concurrency one, and accepts an explicit ceiling up to 16. Project
+contracts may set a lower capacity, and only dependency-independent ready tasks are claimed
+together. It stops at explicit time, claim, no-progress, human, worker/quota, or failure boundaries.
+See [the autopilot contract](docs/autopilot.md).
 
 ## Coding-agent support
 
