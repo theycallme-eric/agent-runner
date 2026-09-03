@@ -4,7 +4,7 @@ import { ClaudeCodeWorker } from "./workers/claude-code.js";
 
 const worker = new ClaudeCodeWorker({
   executable: process.env.AGENT_RUNNER_CLAUDE_BIN ?? "claude",
-  model: "fable",
+  model: "claude-fable-5",
   maxBudgetUsd: 0.1,
   maxTurns: 1,
   tools: [],

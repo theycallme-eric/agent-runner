@@ -24,13 +24,15 @@ type Environment = Readonly<Record<string, string | undefined>>;
 export async function loadWorkerProfiles(
   path: string,
   environment: Environment = process.env,
+  selectedProfiles?: readonly string[],
 ): Promise<LoadedWorkerProfiles> {
-  return parseWorkerProfiles(await readFile(path, "utf8"), environment);
+  return parseWorkerProfiles(await readFile(path, "utf8"), environment, selectedProfiles);
 }
 
 export function parseWorkerProfiles(
   source: string,
   environment: Environment = process.env,
+  selectedProfiles?: readonly string[],
 ): LoadedWorkerProfiles {
   const document = parseDocument(source, { uniqueKeys: true });
   if (document.errors.length > 0) {
@@ -48,6 +50,7 @@ export function parseWorkerProfiles(
   const summaries: WorkerProfileSummary[] = [];
   for (const profile of Object.keys(profiles).sort()) {
     validatePluginId(profile, `profiles.${profile}`);
+    const selected = selectedProfiles === undefined || selectedProfiles.includes(profile);
     const value = objectAt(profiles[profile], `profiles.${profile}`);
     const adapter = stringAt(value.adapter, `profiles.${profile}.adapter`);
     if (adapter === "claude-code") {
@@ -72,30 +75,40 @@ export function parseWorkerProfiles(
         value.environment,
         `profiles.${profile}.environment`,
         environment,
+        selected,
       );
       const model = stringAt(value.model, `profiles.${profile}.model`);
-      const worker = new ClaudeCodeWorker({
-        executable: executableAt(value.executable ?? "claude", `profiles.${profile}.executable`),
-        model,
-        maxBudgetUsd: positiveNumberAt(value.maxBudgetUsd, `profiles.${profile}.maxBudgetUsd`),
-        maxTurns: positiveIntegerAt(value.maxTurns, `profiles.${profile}.maxTurns`),
-        tools: value.tools === undefined ? [] : stringArrayAt(value.tools, `profiles.${profile}.tools`),
-        settingSources: value.settingSources === undefined
-          ? []
-          : settingSourcesAt(value.settingSources, `profiles.${profile}.settingSources`),
-        persistSession: value.persistSession === undefined
-          ? false
-          : booleanAt(value.persistSession, `profiles.${profile}.persistSession`),
-        permissionMode: value.permissionMode === undefined
-          ? "dontAsk"
-          : permissionModeAt(value.permissionMode, `profiles.${profile}.permissionMode`),
-        environment: environmentConfig.values,
-      });
-      registry.register(profile, worker);
+      const executable = executableAt(value.executable ?? "claude", `profiles.${profile}.executable`);
+      const maxBudgetUsd = positiveNumberAt(value.maxBudgetUsd, `profiles.${profile}.maxBudgetUsd`);
+      const maxTurns = positiveIntegerAt(value.maxTurns, `profiles.${profile}.maxTurns`);
+      const tools = value.tools === undefined ? [] : stringArrayAt(value.tools, `profiles.${profile}.tools`);
+      const settingSources = value.settingSources === undefined
+        ? []
+        : settingSourcesAt(value.settingSources, `profiles.${profile}.settingSources`);
+      const persistSession = value.persistSession === undefined
+        ? false
+        : booleanAt(value.persistSession, `profiles.${profile}.persistSession`);
+      const permissionMode = value.permissionMode === undefined
+        ? "dontAsk"
+        : permissionModeAt(value.permissionMode, `profiles.${profile}.permissionMode`);
+      if (selected) {
+        const worker = new ClaudeCodeWorker({
+          executable,
+          model,
+          maxBudgetUsd,
+          maxTurns,
+          tools,
+          settingSources,
+          persistSession,
+          permissionMode,
+          environment: environmentConfig.values,
+        });
+        registry.register(profile, worker);
+      }
       summaries.push({
         profile,
         adapter,
-        worker: worker.name,
+        worker: "claude-code",
         model,
         environmentVariables: environmentConfig.sourceNames,
       });
@@ -113,20 +126,26 @@ export function parseWorkerProfiles(
         value.environment,
         `profiles.${profile}.environment`,
         environment,
+        selected,
       );
-      const worker = new JsonProcessWorker({
-        name: pluginIdAt(value.name, `profiles.${profile}.name`),
-        executable: executableAt(value.executable, `profiles.${profile}.executable`),
-        arguments: value.arguments === undefined
-          ? []
-          : argumentArrayAt(value.arguments, `profiles.${profile}.arguments`),
-        environment: environmentConfig.values,
-      });
-      registry.register(profile, worker);
+      const name = pluginIdAt(value.name, `profiles.${profile}.name`);
+      const executable = executableAt(value.executable, `profiles.${profile}.executable`);
+      const argumentsList = value.arguments === undefined
+        ? []
+        : argumentArrayAt(value.arguments, `profiles.${profile}.arguments`);
+      if (selected) {
+        const worker = new JsonProcessWorker({
+          name,
+          executable,
+          arguments: argumentsList,
+          environment: environmentConfig.values,
+        });
+        registry.register(profile, worker);
+      }
       summaries.push({
         profile,
         adapter,
-        worker: worker.name,
+        worker: name,
         model: null,
         environmentVariables: environmentConfig.sourceNames,
       });
@@ -141,6 +160,7 @@ function resolveEnvironment(
   value: unknown,
   path: string,
   environment: Environment,
+  required: boolean,
 ): { values: Record<string, string>; sourceNames: string[] } {
   if (value === undefined) {
     return { values: {}, sourceNames: [] };
@@ -155,12 +175,15 @@ function resolveEnvironment(
     const reference = objectAt(entries[target], `${path}.${target}`);
     exactKeys(reference, ["fromEnv"], `${path}.${target}`);
     const source = environmentNameAt(reference.fromEnv, `${path}.${target}.fromEnv`);
+    sourceNames.push(source);
+    if (!required) {
+      continue;
+    }
     const resolved = environment[source];
     if (resolved === undefined || resolved === "") {
       throw new Error(`${path}.${target} requires missing environment variable ${source}`);
     }
     values[target] = resolved;
-    sourceNames.push(source);
   }
   return { values, sourceNames };
 }

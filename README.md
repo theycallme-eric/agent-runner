@@ -112,7 +112,10 @@ altered handoff fails the entire read before a claim can be created. Task-specif
 verification commands run independently after the worker, followed by every project-level required
 verification command.
 
-`profiles` validates controller-owned worker configuration and prints only non-secret metadata. The
+`profiles` validates controller-owned worker configuration and prints only non-secret metadata. It
+does not require credentials merely to list profiles. Execution resolves credentials only for the
+profile selected by the target project, while autopilot resolves only profiles used by enabled
+projects; choosing a provider with a missing credential still fails closed. The
 default path is `~/.config/agent-runner/workers.yml`; `--profiles` or
 `AGENT_RUNNER_WORKER_CONFIG` selects another file. See the checked-in
 [example](examples/workers.yml).

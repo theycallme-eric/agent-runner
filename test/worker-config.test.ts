@@ -87,6 +87,33 @@ profiles:
   );
 });
 
+test("loads credentials only for selected worker profiles", () => {
+  const source = `
+version: 1
+profiles:
+  selected:
+    adapter: claude-code
+    executable: claude
+    model: claude-fable-5
+    maxBudgetUsd: 1
+    maxTurns: 1
+  unused:
+    adapter: json-process
+    name: unused-worker
+    executable: unused-worker
+    environment:
+      TOKEN: { fromEnv: UNUSED_TOKEN }
+`;
+
+  const loaded = parseWorkerProfiles(source, {}, ["selected"]);
+  assert.deepEqual(loaded.registry.list(), [{ profile: "selected", worker: "claude-code" }]);
+  assert.deepEqual(loaded.summaries.map((summary) => summary.profile), ["selected", "unused"]);
+  assert.throws(
+    () => parseWorkerProfiles(source, {}, ["unused"]),
+    /missing environment variable UNUSED_TOKEN/,
+  );
+});
+
 test("unknown adapters and fields are rejected instead of ignored", () => {
   assert.throws(
     () => parseWorkerProfiles(`

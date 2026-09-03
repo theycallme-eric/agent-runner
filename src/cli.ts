@@ -222,7 +222,7 @@ async function readyCommand(argumentsList: string[]): Promise<void> {
 async function profilesCommand(argumentsList: string[]): Promise<void> {
   const path = workerConfigPathFrom(argumentsList);
   const { loadWorkerProfiles } = await import("./workers/config.js");
-  const loaded = await loadWorkerProfiles(path);
+  const loaded = await loadWorkerProfiles(path, process.env, []);
   print({ path, profiles: loaded.summaries });
 }
 
@@ -284,7 +284,12 @@ async function runOnceCommand(argumentsList: string[]): Promise<void> {
     const dependencies = new DependencyResolverRegistry();
     registerGitHubAdapters(providers, dependencies, ghExecutable);
     const planner = new ProjectPlanner(runs, providers, dependencies);
-    const workers = await loadWorkerProfiles(profilesPath);
+    const selectedProject = projects.get(projectId);
+    const workers = await loadWorkerProfiles(
+      profilesPath,
+      process.env,
+      selectedProject ? [selectedProject.workerProfile] : [],
+    );
     const publishers = new PullRequestPublisherRegistry();
     publishers.register(new GitHubPullRequestPublisher({ ghExecutable, gitExecutable }));
     const repository = new GitWorkspaceRepository(gitExecutable);
@@ -375,7 +380,10 @@ async function autopilotCommand(argumentsList: string[]): Promise<void> {
     const providers = new TaskProviderRegistry();
     const dependencies = new DependencyResolverRegistry();
     registerGitHubAdapters(providers, dependencies, ghExecutable);
-    const workers = await loadWorkerProfiles(profilesPath);
+    const selectedProfiles = [...new Set(
+      projects.list().filter((project) => project.enabled).map((project) => project.workerProfile),
+    )];
+    const workers = await loadWorkerProfiles(profilesPath, process.env, selectedProfiles);
     const publishers = new PullRequestPublisherRegistry();
     publishers.register(new GitHubPullRequestPublisher({ ghExecutable, gitExecutable }));
     const repository = new GitWorkspaceRepository(gitExecutable);

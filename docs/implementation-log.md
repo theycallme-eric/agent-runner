@@ -4,6 +4,19 @@ Concise chronological handoff for humans and coding agents. Record material chan
 approaches, corrections, verification evidence, and the next open decision. Do not copy chat
 transcripts or secrets here.
 
+## 2026-09-03 — Correct live Fable selection and isolate provider credentials
+
+- The disposable end-to-end proof found that the shipped `fable` short model value returns 404 in
+  the installed Claude Code client; Anthropic's current active identifier is `claude-fable-5`.
+- Updated the checked-in example, local ignored execution profile, and manual smoke diagnostic to
+  use the full identifier. Worker profile names remain controller-local and replaceable.
+- Mirrored the Requirements Builder correction that validates every configured profile's structure
+  but resolves credentials only for the selected project workers. Listing profiles no longer needs
+  every provider credential, and an unused provider cannot block a run; selecting that provider with
+  a missing credential still fails closed.
+- Added deterministic regression coverage. No Anthropic worker was launched from Agent Runner while
+  the provider was experiencing an outage.
+
 ## 2026-09-02 — Add explicit independent repository creation
 
 - Added `create-project` as the explicit alternative to registering an existing product repository.
