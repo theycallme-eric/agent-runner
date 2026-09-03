@@ -158,6 +158,8 @@ test("stops immediately at a human gate", async () => {
         pullRequestUrl: null,
         pullRequestState: "none",
         ciStatus: null,
+        ciWaitExpired: false,
+        ciWaitDetail: null,
         failureReason: null,
       });
       return result;
@@ -261,6 +263,8 @@ test("stops new claims at the ceiling but drains already claimed work", async ()
           pullRequestUrl: "https://example.invalid/pull/in-flight",
           pullRequestState: "merged",
           ciStatus: "passed",
+          ciWaitExpired: false,
+          ciWaitDetail: null,
           failureReason: null,
         });
       }
@@ -314,6 +318,8 @@ test("passes an explicit parallel ceiling to the bounded run-once controller", a
         pullRequestUrl: null,
         pullRequestState: "none",
         ciStatus: null,
+        ciWaitExpired: false,
+        ciWaitDetail: null,
         failureReason: null,
       });
       return result;
@@ -359,6 +365,8 @@ test("retries transient delivery failures until the bounded no-progress stop", a
         delivery: "retryable-failure",
         pullRequestUrl: "https://example.invalid/pull/retry",
         ciStatus: "passed",
+        ciWaitExpired: false,
+        ciWaitDetail: null,
         failureReason: null,
       });
       result.reconciliation.push({
@@ -377,6 +385,8 @@ test("retries transient delivery failures until the bounded no-progress stop", a
         pullRequestUrl: "https://example.invalid/pull/retry",
         pullRequestState: "open",
         ciStatus: "passed",
+        ciWaitExpired: false,
+        ciWaitDetail: null,
         failureReason: null,
       });
       return result;
@@ -397,6 +407,165 @@ test("retries transient delivery failures until the bounded no-progress stop", a
 
     assert.equal(result.stopReason, "no-progress");
     assert.equal(calls, 4);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("a terminal failure stops the session even when another item is retryable", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  let calls = 0;
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      calls += 1;
+      const result = resultFixture(request.projectId, "worker-a", false);
+      result.ok = false;
+      result.reconciled.push({
+        taskId: "TASK-TERMINAL",
+        runId: "run-terminal",
+        state: "failed",
+        execution: "not-run",
+        worker: null,
+        workspacePath: "/workspaces/terminal",
+        delivery: "failed",
+        pullRequestUrl: null,
+        ciStatus: null,
+        ciWaitExpired: false,
+        ciWaitDetail: null,
+        failureReason: "verified-workspace-drifted",
+      });
+      result.reconciled.push({
+        taskId: "TASK-RETRY",
+        runId: "run-retry",
+        state: "ci",
+        execution: "not-run",
+        worker: null,
+        workspacePath: "/workspaces/retry",
+        delivery: "retryable-failure",
+        pullRequestUrl: "https://example.invalid/pull/retry",
+        ciStatus: "passed",
+        ciWaitExpired: false,
+        ciWaitDetail: null,
+        failureReason: null,
+      });
+      return result;
+    },
+  }, { sleep: async () => undefined });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "terminal",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+
+    assert.equal(result.stopReason, "run-failure");
+    assert.equal(calls, 1);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("pending required CI is progress until its bounded wait expires", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  let now = 0;
+  let calls = 0;
+  const waiting = (expired: boolean) => ({
+    runId: "run-waiting",
+    taskId: "TASK-WAITING",
+    initialState: "ci" as const,
+    state: "ci" as const,
+    execution: "not-run" as const,
+    lease: "acquired" as const,
+    outcome: "waiting-ci" as const,
+    base: "current" as const,
+    workspace: "present" as const,
+    workerStatus: "succeeded",
+    workerSessionId: "session",
+    branchName: "agent/task-waiting",
+    pullRequestUrl: "https://example.invalid/pull/waiting",
+    pullRequestState: "open" as const,
+    ciStatus: "pending",
+    ciWaitExpired: expired,
+    ciWaitDetail: expired ? "Required checks are not complete: node-tests (pending)" : null,
+    failureReason: null,
+  });
+  const runner = (expired: boolean) => ({
+    run: async (request: RunOnceRequest): Promise<RunOnceResult> => {
+      calls += 1;
+      const result = resultFixture(request.projectId, "worker-a", false);
+      result.reconciliation.push(waiting(expired));
+      result.reconciled.push({
+        taskId: "TASK-WAITING",
+        runId: "run-waiting",
+        state: "ci",
+        execution: "not-run",
+        worker: null,
+        workspacePath: "/workspaces/waiting",
+        delivery: "waiting-ci",
+        pullRequestUrl: "https://example.invalid/pull/waiting",
+        ciStatus: "pending",
+        ciWaitExpired: expired,
+        ciWaitDetail: expired ? "Required checks are not complete: node-tests (pending)" : null,
+        failureReason: null,
+      });
+      return result;
+    },
+  });
+
+  try {
+    const pending = await new AutopilotController(projects, runs, runner(false), {
+      now: () => now,
+      sleep: async (milliseconds) => {
+        now += milliseconds;
+      },
+    }).run({
+      enabled: true,
+      controllerId: "waiting",
+      leaseDurationMs: 1_000,
+      deadlineAt: 1_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 2,
+      pollIntervalMs: 100,
+      globalConcurrency: 1,
+    });
+
+    assert.equal(pending.stopReason, "deadline");
+    assert.ok(pending.passes.length > 2, "an unexpired CI wait must outlive the no-progress limit");
+    assert.equal(pending.noProgressPasses, 0);
+
+    calls = 0;
+    const expired = await new AutopilotController(projects, runs, runner(true), {
+      sleep: async () => undefined,
+    }).run({
+      enabled: true,
+      controllerId: "waiting",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+
+    assert.equal(expired.stopReason, "ci-wait-timeout");
+    assert.equal(calls, 1);
+    assert.deepEqual(expired.report.ciWaitTimeouts, [{
+      projectId: "fixture/one",
+      taskId: "TASK-WAITING",
+      runId: "run-waiting",
+      pullRequestUrl: "https://example.invalid/pull/waiting",
+      detail: "Required checks are not complete: node-tests (pending)",
+    }]);
   } finally {
     runs.close();
     projects.close();
@@ -439,6 +608,8 @@ function resultFixture(
     delivery: "waiting-ci" as const,
     pullRequestUrl: `https://example.invalid/${project}`,
     ciStatus: "pending",
+    ciWaitExpired: false,
+    ciWaitDetail: null,
     failureReason: null,
   };
   return {

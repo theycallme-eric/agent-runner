@@ -240,6 +240,7 @@ async function runOnceCommand(argumentsList: string[]): Promise<void> {
   const maxClaims = positiveOption(argumentsList, "--limit", 1);
   const targetTaskId = option(argumentsList, "--task");
   const leaseDurationMs = positiveOption(argumentsList, "--lease-seconds", 300) * 1_000;
+  const maxCiWaitMinutes = positiveOption(argumentsList, "--max-ci-wait-minutes", 30);
   const controllerId = option(argumentsList, "--controller") ?? `${hostname()}-${process.pid}`;
   const dryRun = argumentsList.includes("--dry-run");
   const ghExecutable = process.env.AGENT_RUNNER_GH_BIN ?? "gh";
@@ -304,6 +305,7 @@ async function runOnceCommand(argumentsList: string[]): Promise<void> {
       baseRevisions,
       publishers,
       new ShellCommandRunner(),
+      { maxCiWaitMinutes },
     );
     const result = await controller.run({
       projectId,
@@ -336,6 +338,7 @@ async function autopilotCommand(argumentsList: string[]): Promise<void> {
   const pollIntervalMs = positiveOption(argumentsList, "--poll-seconds", 60) * 1_000;
   const globalConcurrency = positiveOption(argumentsList, "--concurrency", 1);
   const leaseDurationMs = positiveOption(argumentsList, "--lease-seconds", 300) * 1_000;
+  const maxCiWaitMinutes = positiveOption(argumentsList, "--max-ci-wait-minutes", 30);
   const controllerId = option(argumentsList, "--controller") ?? `${hostname()}-${process.pid}`;
   const ghExecutable = process.env.AGENT_RUNNER_GH_BIN ?? "gh";
   const gitExecutable = process.env.AGENT_RUNNER_GIT_BIN ?? "git";
@@ -398,6 +401,7 @@ async function autopilotCommand(argumentsList: string[]): Promise<void> {
       baseRevisions,
       publishers,
       new ShellCommandRunner(),
+      { maxCiWaitMinutes },
     );
     const startedAt = Date.now();
     const result = await new AutopilotController(projects, runs, runOnce).run({
@@ -477,10 +481,10 @@ function usage(): void {
   agent-runner profiles [--profiles <worker-config>]
   agent-runner run-once <project-id> [--dry-run] [--limit <count>] [--task <task-id>]
     [--state <database>] [--profiles <worker-config>] [--workspace-root <directory>]
-    [--controller <id>] [--lease-seconds <seconds>]
+    [--controller <id>] [--lease-seconds <seconds>] [--max-ci-wait-minutes <minutes>]
   agent-runner autopilot --enable [--minutes <count>] [--max-new-claims <count>]
     [--concurrency <count>] [--no-progress-passes <count>] [--poll-seconds <seconds>]
-    [--state <database>]
+    [--max-ci-wait-minutes <minutes>] [--state <database>]
     [--profiles <worker-config>] [--workspace-root <directory>] [--controller <id>]
     [--lease-seconds <seconds>]`);
   process.exitCode = 2;

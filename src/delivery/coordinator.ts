@@ -14,7 +14,7 @@ import type {
   PullRequestSnapshot,
 } from "./types.js";
 
-const DEFAULT_MAX_CI_WAIT_MINUTES = 30;
+export const DEFAULT_MAX_CI_WAIT_MINUTES = 30;
 
 export interface DeliverTaskRequest {
   runId: string;

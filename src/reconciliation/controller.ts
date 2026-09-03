@@ -1,7 +1,11 @@
 import { protectedPathGate } from "../core/policy.js";
 import type { RunStore } from "../core/store.js";
 import type { RunRecord, RunState } from "../core/types.js";
-import { DeliveryCoordinator, type DeliveryResult } from "../delivery/coordinator.js";
+import {
+  DEFAULT_MAX_CI_WAIT_MINUTES,
+  DeliveryCoordinator,
+  type DeliveryResult,
+} from "../delivery/coordinator.js";
 import type { PullRequestPublisher } from "../delivery/types.js";
 import type { CommandOutcome, CommandRunner } from "../execution/command-runner.js";
 import { TaskExecutor, type TaskExecutionResult } from "../execution/task-executor.js";
@@ -61,11 +65,14 @@ export interface ReconciliationResult {
   pullRequestUrl: string | null;
   pullRequestState: "none" | "open" | "closed" | "merged" | "missing" | "unknown";
   ciStatus: string | null;
+  ciWaitExpired: boolean;
+  ciWaitDetail: string | null;
   failureReason: string | null;
 }
 
 export interface ReconciliationControllerOptions {
   now?: () => number;
+  maxCiWaitMinutes?: number;
 }
 
 export class ReconciliationController {
@@ -77,6 +84,7 @@ export class ReconciliationController {
   readonly #baseRevisions: BaseRevisionProvider;
   readonly #publisher: PullRequestPublisher | null;
   readonly #now: () => number;
+  readonly #maxCiWaitMinutes: number;
 
   constructor(
     runs: RunStore,
@@ -96,6 +104,7 @@ export class ReconciliationController {
     this.#baseRevisions = baseRevisions;
     this.#publisher = publisher;
     this.#now = options.now ?? Date.now;
+    this.#maxCiWaitMinutes = options.maxCiWaitMinutes ?? DEFAULT_MAX_CI_WAIT_MINUTES;
   }
 
   async reconcileProject(request: ReconcileProjectRequest): Promise<ReconciliationResult[]> {
@@ -161,6 +170,8 @@ export class ReconciliationController {
         pullRequestUrl: currentDelivery?.url ?? null,
         pullRequestState: currentDelivery ? observedPullRequestState : "none",
         ciStatus: currentDelivery?.ciStatus ?? null,
+        ciWaitExpired: false,
+        ciWaitDetail: null,
         failureReason: run.failureReason,
       };
     };
@@ -308,8 +319,8 @@ export class ReconciliationController {
         }
         if (observed.state === "merged") {
           const delivered = await this.#deliver(run.id, task, request);
-          const final = result();
-          return { ...final, outcome: delivered.outcome, pullRequestState: "merged" };
+          const final = withDelivery(result(), delivered);
+          return { ...final, pullRequestState: "merged" };
         }
       }
 
@@ -329,7 +340,7 @@ export class ReconciliationController {
         : null;
       const final = result();
       return delivered
-        ? { ...final, outcome: delivered.outcome }
+        ? withDelivery(final, delivered)
         : { ...final, outcome: "synchronized" };
     } catch (error) {
       const run = this.#runs.get(initial.id) ?? initial;
@@ -440,7 +451,13 @@ export class ReconciliationController {
       this.#repository,
       this.#publisher,
       { now: this.#now, baseRevisions: this.#baseRevisions },
-    ).deliver({ runId, task, project: request.project, contract: request.contract });
+    ).deliver({
+      runId,
+      task,
+      project: request.project,
+      contract: request.contract,
+      maxCiWaitMinutes: this.#maxCiWaitMinutes,
+    });
   }
 
   async #withHeartbeat<T>(
@@ -521,13 +538,25 @@ function outcomeFor(run: RunRecord): ReconciliationResult["outcome"] {
   return "synchronized";
 }
 
+function withDelivery(
+  current: ReconciliationResult,
+  delivery: DeliveryResult,
+): ReconciliationResult {
+  return {
+    ...current,
+    outcome: delivery.outcome,
+    ciWaitExpired: delivery.ciWaitExpired,
+    ciWaitDetail: delivery.ciWaitExpired ? delivery.message : null,
+  };
+}
+
 function executionResult(
   current: ReconciliationResult,
   execution: TaskExecutionResult,
   delivery: DeliveryResult | null,
 ): ReconciliationResult {
   if (delivery) {
-    return { ...current, outcome: delivery.outcome };
+    return withDelivery(current, delivery);
   }
   if (execution.outcome === "failed" || execution.outcome === "lease-lost") {
     return { ...current, outcome: "failed" };

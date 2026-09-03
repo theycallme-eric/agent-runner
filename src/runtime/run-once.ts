@@ -1,5 +1,9 @@
 import type { RunStore } from "../core/store.js";
-import { DeliveryCoordinator, type DeliveryResult } from "../delivery/coordinator.js";
+import {
+  DEFAULT_MAX_CI_WAIT_MINUTES,
+  DeliveryCoordinator,
+  type DeliveryResult,
+} from "../delivery/coordinator.js";
 import type { PullRequestPublisherRegistry } from "../delivery/registry.js";
 import type { CommandRunner } from "../execution/command-runner.js";
 import { TaskExecutor, type TaskExecutionResult } from "../execution/task-executor.js";
@@ -34,6 +38,8 @@ export interface RunOnceTaskResult {
   delivery: DeliveryResult["outcome"] | "not-requested" | null;
   pullRequestUrl: string | null;
   ciStatus: string | null;
+  ciWaitExpired: boolean;
+  ciWaitDetail: string | null;
   failureReason: string | null;
 }
 
@@ -61,6 +67,7 @@ export interface RunOnceResult {
 
 export interface RunOnceControllerOptions {
   now?: () => number;
+  maxCiWaitMinutes?: number;
 }
 
 export class RunOnceController {
@@ -74,6 +81,7 @@ export class RunOnceController {
   readonly #publishers: PullRequestPublisherRegistry;
   readonly #commands: CommandRunner;
   readonly #now: () => number;
+  readonly #maxCiWaitMinutes: number;
 
   constructor(
     projects: ProjectRegistryStore,
@@ -97,6 +105,7 @@ export class RunOnceController {
     this.#publishers = publishers;
     this.#commands = commands;
     this.#now = options.now ?? Date.now;
+    this.#maxCiWaitMinutes = options.maxCiWaitMinutes ?? DEFAULT_MAX_CI_WAIT_MINUTES;
   }
 
   async run(request: RunOnceRequest): Promise<RunOnceResult> {
@@ -157,7 +166,7 @@ export class RunOnceController {
       this.#commands,
       this.#baseRevisions,
       publisher,
-      { now: this.#now },
+      { now: this.#now, maxCiWaitMinutes: this.#maxCiWaitMinutes },
     ).reconcileProject({
       project,
       contract,
@@ -209,6 +218,7 @@ export class RunOnceController {
           task: claim.task,
           project,
           contract,
+          maxCiWaitMinutes: this.#maxCiWaitMinutes,
         });
       }
       const finalRun = this.#runs.get(execution.run.id) ?? execution.run;
@@ -229,6 +239,8 @@ export class RunOnceController {
         delivery: delivery?.outcome ?? (contract.delivery.pullRequest ? null : "not-requested"),
         pullRequestUrl: persistedDelivery?.url ?? null,
         ciStatus: persistedDelivery?.ciStatus ?? null,
+        ciWaitExpired: delivery?.ciWaitExpired ?? false,
+        ciWaitDetail: delivery?.ciWaitExpired ? delivery.message : null,
         failureReason: finalRun.failureReason,
       } satisfies RunOnceTaskResult;
     }));
@@ -250,6 +262,8 @@ export class RunOnceController {
         delivery: reconciliationDelivery(item.outcome),
         pullRequestUrl: item.pullRequestUrl,
         ciStatus: item.ciStatus,
+        ciWaitExpired: item.ciWaitExpired,
+        ciWaitDetail: item.ciWaitDetail,
         failureReason: item.failureReason,
       };
     });

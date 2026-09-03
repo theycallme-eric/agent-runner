@@ -15,6 +15,7 @@ export type AutopilotStopReason =
   | "worker-unavailable"
   | "quota-unavailable"
   | "run-failure"
+  | "ci-wait-timeout"
   | "no-enabled-projects";
 
 export interface AutopilotRequest {
@@ -73,6 +74,13 @@ export interface AutopilotResult {
       ready: string[];
       waiting: string[];
       blocked: string[];
+    }>;
+    ciWaitTimeouts: Array<{
+      projectId: string;
+      taskId: string;
+      runId: string;
+      pullRequestUrl: string | null;
+      detail: string | null;
     }>;
   };
 }
@@ -245,16 +253,41 @@ export class AutopilotController {
         waiting: result.waiting,
         blocked: result.blocked,
       })),
+      ciWaitTimeouts: [...latest.entries()].flatMap(([projectId, result]) =>
+        [...result.claimed, ...result.reconciled]
+          .filter((item) => item.ciWaitExpired)
+          .map((item) => ({
+            projectId,
+            taskId: item.taskId,
+            runId: item.runId,
+            pullRequestUrl: item.pullRequestUrl,
+            detail: item.ciWaitDetail,
+          }))
+      ),
     };
   }
 }
 
 function madeProgress(result: RunOnceResult): boolean {
-  return result.claimed.length > 0 || result.reconciliation.some((item) =>
-    item.initialState !== item.state ||
-    item.base === "advanced" ||
-    item.execution !== "not-run" ||
-    ["completed", "failed", "waiting-human"].includes(item.outcome));
+  return result.claimed.length > 0 ||
+    result.reconciliation.some((item) =>
+      item.initialState !== item.state ||
+      item.base === "advanced" ||
+      item.execution !== "not-run" ||
+      ["completed", "failed", "waiting-human"].includes(item.outcome)) ||
+    waitingOnRequiredCi(result);
+}
+
+function waitingOnRequiredCi(result: RunOnceResult): boolean {
+  return [...result.claimed, ...result.reconciled].some((item) =>
+    item.delivery === "waiting-ci" && !item.ciWaitExpired) ||
+    result.reconciliation.some((item) =>
+      item.outcome === "waiting-ci" && !item.ciWaitExpired);
+}
+
+function ciWaitExpired(result: RunOnceResult): boolean {
+  return [...result.claimed, ...result.reconciled].some((item) => item.ciWaitExpired) ||
+    result.reconciliation.some((item) => item.ciWaitExpired);
 }
 
 function stopFor(result: RunOnceResult, runs: RunStore): AutopilotStopReason | null {
@@ -262,18 +295,21 @@ function stopFor(result: RunOnceResult, runs: RunStore): AutopilotStopReason | n
     result.claimed.some((item) => item.state === "waiting-human") ||
     result.reconciliation.some((item) => item.outcome === "waiting-human")
   ) return "human-gate";
-  if (result.ok) return null;
-  const tasks = [...result.claimed, ...result.reconciled];
-  const failed = tasks.find((item) => item.failureReason);
-  if (failed?.failureReason === "worker-profile-unavailable") return "worker-unavailable";
-  if (failed) {
-    const summary = runs.execution(failed.runId)?.workerSummary ?? "";
-    if (/quota|rate limit|usage limit|capacity/i.test(summary)) return "quota-unavailable";
+  if (!result.ok) {
+    const tasks = [...result.claimed, ...result.reconciled];
+    const failed = tasks.find((item) => item.failureReason);
+    if (failed?.failureReason === "worker-profile-unavailable") return "worker-unavailable";
+    if (failed) {
+      const summary = runs.execution(failed.runId)?.workerSummary ?? "";
+      if (/quota|rate limit|usage limit|capacity/i.test(summary)) return "quota-unavailable";
+      return "run-failure";
+    }
+    const retryable = tasks.some((item) => item.delivery === "retryable-failure") ||
+      result.reconciliation.some((item) => item.outcome === "retryable-failure");
+    if (!retryable) return "run-failure";
   }
-  const retryable = tasks.some((item) => item.delivery === "retryable-failure") ||
-    result.reconciliation.some((item) => item.outcome === "retryable-failure");
-  if (retryable) return null;
-  return "run-failure";
+  if (ciWaitExpired(result)) return "ci-wait-timeout";
+  return null;
 }
 
 function validateRequest(request: AutopilotRequest): void {
