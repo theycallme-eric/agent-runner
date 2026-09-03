@@ -63,6 +63,12 @@ interface RunExecutionRow {
   updated_at: number;
 }
 
+interface RunCiWaitRow {
+  run_id: string;
+  head_sha: string;
+  first_pending_at: number;
+}
+
 interface RunDeliveryRow {
   run_id: string;
   provider: string;
@@ -103,6 +109,12 @@ export interface DeliveryEvidence {
   headSha: string;
   draft: boolean;
   ciStatus: DeliveryCiStatus;
+}
+
+export interface RunCiWaitRecord {
+  runId: string;
+  headSha: string;
+  firstPendingAt: number;
 }
 
 export interface TransitionPatch {
@@ -613,6 +625,39 @@ export class RunStore {
     return delivery;
   }
 
+  ciWait(runId: string): RunCiWaitRecord | null {
+    const row = this.#database
+      .prepare("SELECT * FROM run_ci_wait WHERE run_id = ?")
+      .get(runId) as RunCiWaitRow | undefined;
+    return row
+      ? { runId: row.run_id, headSha: row.head_sha, firstPendingAt: row.first_pending_at }
+      : null;
+  }
+
+  recordCiWait(runId: string, headSha: string, now: number): RunCiWaitRecord {
+    this.#require(runId);
+    if (headSha.trim() === "") {
+      throw new Error("A CI wait clock requires a pull-request head");
+    }
+    const existing = this.ciWait(runId);
+    if (existing && existing.headSha === headSha) {
+      return existing;
+    }
+    this.#database
+      .prepare(`
+        INSERT INTO run_ci_wait (run_id, head_sha, first_pending_at) VALUES (?, ?, ?)
+        ON CONFLICT(run_id) DO UPDATE SET
+          head_sha = excluded.head_sha,
+          first_pending_at = excluded.first_pending_at
+      `)
+      .run(runId, headSha, now);
+    return { runId, headSha, firstPendingAt: now };
+  }
+
+  clearCiWait(runId: string): void {
+    this.#database.prepare("DELETE FROM run_ci_wait WHERE run_id = ?").run(runId);
+  }
+
   delivery(runId: string): RunDeliveryRecord | null {
     const row = this.#database
       .prepare("SELECT * FROM run_delivery WHERE run_id = ?")
@@ -662,6 +707,12 @@ export class RunStore {
         worker_cost_usd REAL,
         worker_duration_ms INTEGER,
         updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS run_ci_wait (
+        run_id TEXT PRIMARY KEY REFERENCES runs(id),
+        head_sha TEXT NOT NULL,
+        first_pending_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS run_delivery (

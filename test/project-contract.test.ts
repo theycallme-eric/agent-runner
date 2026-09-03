@@ -82,3 +82,26 @@ test("rejects unsafe task provider identifiers", () => {
     /tasks\.provider must be a lowercase plugin identifier/,
   );
 });
+
+test("accepts an optional per-project CI wait bound and rejects invalid values", () => {
+  assert.equal(parseProjectContract(fixture).delivery.maxCiWaitMinutes, undefined);
+
+  const bounded = fixture.replace(
+    "merge: never",
+    "merge: never\n  maxCiWaitMinutes: 45",
+  );
+  assert.equal(parseProjectContract(bounded).delivery.maxCiWaitMinutes, 45);
+
+  for (const invalid of ["0", "-5", "12.5", '"45"']) {
+    const broken = fixture.replace(
+      "merge: never",
+      `merge: never\n  maxCiWaitMinutes: ${invalid}`,
+    );
+    assert.throws(
+      () => parseProjectContract(broken),
+      /delivery.maxCiWaitMinutes must be a positive integer/,
+      `expected ${invalid} to be rejected`,
+    );
+  }
+});
+

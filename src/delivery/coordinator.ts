@@ -1,22 +1,27 @@
 import { protectedPathGate } from "../core/policy.js";
 import type { RunStore } from "../core/store.js";
-import type { RunDeliveryRecord, RunRecord } from "../core/types.js";
+import type { DeliveryCiStatus, RunDeliveryRecord, RunRecord } from "../core/types.js";
 import type { ProjectContract } from "../project-contract.js";
 import type { ProjectRegistration } from "../projects/types.js";
 import type { TaskNode } from "../tasks/types.js";
 import type { WorkspaceRepository } from "../workspaces/git-repository.js";
 import type { BaseRevisionProvider } from "../workspaces/base-revision.js";
 import type {
+  CiCheck,
+  CiCheckBucket,
   DraftPullRequestRequest,
   PullRequestPublisher,
   PullRequestSnapshot,
 } from "./types.js";
+
+const DEFAULT_MAX_CI_WAIT_MINUTES = 30;
 
 export interface DeliverTaskRequest {
   runId: string;
   task: TaskNode;
   project: ProjectRegistration;
   contract: ProjectContract;
+  maxCiWaitMinutes?: number;
 }
 
 export interface DeliveryResult {
@@ -24,6 +29,7 @@ export interface DeliveryResult {
   run: RunRecord;
   delivery: RunDeliveryRecord | null;
   message: string | null;
+  ciWaitExpired: boolean;
 }
 
 export interface DeliveryCoordinatorOptions {
@@ -69,6 +75,7 @@ export class DeliveryCoordinator {
         run: initial,
         delivery: requireDelivery(this.#runs, initial.id),
         message: null,
+        ciWaitExpired: false,
       };
     }
 
@@ -109,6 +116,7 @@ export class DeliveryCoordinator {
         run: this.#runs.get(run.id) ?? run,
         delivery: null,
         message: "Protected paths require human approval before publication",
+        ciWaitExpired: false,
       };
     }
 
@@ -247,6 +255,26 @@ export class DeliveryCoordinator {
       run = this.#runs.transition(run.id, "pr-open", at());
     }
 
+    const automaticMerge = request.contract.delivery.merge === "after-required-checks";
+    if (
+      automaticMerge &&
+      (!this.#publisher.validateAutomaticMerge || !this.#publisher.mergeVerified)
+    ) {
+      return this.#terminalFailure(run, "automatic-merge-unsupported", at());
+    }
+    let requiredChecks: string[] = [];
+    if (automaticMerge && this.#publisher.validateAutomaticMerge) {
+      try {
+        const validation = await this.#publisher.validateAutomaticMerge(
+          request.project.id,
+          request.contract.project.baseBranch,
+        );
+        requiredChecks = validation.requiredChecks;
+      } catch (error) {
+        return this.#retryableFailure(run.id, "automatic-merge-policy-unconfirmed", error, at());
+      }
+    }
+
     let ci;
     try {
       ci = await this.#publisher.checkCi(publishRequest, pullRequest);
@@ -257,16 +285,50 @@ export class DeliveryCoordinator {
       return this.#terminalFailure(run, "invalid-ci-status", at(), ci);
     }
     this.#runs.recordEvidence(run.id, "ci-observed", ci, at());
-    const delivery = this.#runs.updateDeliveryCi(run.id, ci.status, at());
+
+    let waitingContexts: string[] = [];
+    let failedContexts: string[] = [];
+    if (automaticMerge) {
+      if (ci.status === "passed" && ci.checks === undefined) {
+        return this.#terminalFailure(run, "required-checks-unreported", at(), { requiredChecks });
+      }
+      const reconciled = reconcileRequiredChecks(requiredChecks, ci.checks ?? []);
+      waitingContexts = reconciled.waiting;
+      failedContexts = reconciled.failed;
+    }
+    const downgraded = ci.status === "passed" && waitingContexts.length > 0;
+    const observedStatus: DeliveryCiStatus = failedContexts.length > 0
+      ? "failed"
+      : downgraded
+        ? "pending"
+        : ci.status;
+
+    const delivery = this.#runs.updateDeliveryCi(run.id, observedStatus, at());
     if (run.state === "pr-open") {
       run = this.#runs.transition(run.id, "ci", at());
     }
-    if (ci.status === "failed") {
-      run = this.#runs.transition(run.id, "failed", at(), { failureReason: "ci-failed" });
-      return { outcome: "failed", run, delivery, message: "Required CI failed" };
+    if (downgraded || failedContexts.length > 0) {
+      this.#runs.recordEvidence(run.id, "required-checks-incomplete", {
+        requiredChecks,
+        unsatisfied: [...failedContexts, ...waitingContexts],
+        observed: ci.checks ?? [],
+      }, at());
     }
-    if (ci.status === "passed") {
-      if (request.contract.delivery.merge === "after-required-checks") {
+    if (observedStatus === "failed") {
+      this.#runs.clearCiWait(run.id);
+      run = this.#runs.transition(run.id, "failed", at(), { failureReason: "ci-failed" });
+      return {
+        outcome: "failed",
+        run,
+        delivery,
+        message: failedContexts.length > 0
+          ? `Required CI failed: ${failedContexts.join(", ")}`
+          : "Required CI failed",
+        ciWaitExpired: false,
+      };
+    }
+    if (observedStatus === "passed") {
+      if (automaticMerge) {
         if (!this.#publisher.mergeVerified) {
           return this.#terminalFailure(run, "automatic-merge-unsupported", at());
         }
@@ -294,19 +356,36 @@ export class DeliveryCoordinator {
           ciStatus: "passed",
         }, at());
       }
+      this.#runs.clearCiWait(run.id);
       run = this.#runs.transition(run.id, "completed", at());
       return {
         outcome: "completed",
         run,
         delivery: requireDelivery(this.#runs, run.id),
         message: null,
+        ciWaitExpired: false,
       };
     }
+    const wait = this.#runs.recordCiWait(run.id, pullRequest.headSha, at());
+    const boundMs = ciWaitBoundMs(request);
+    const ciWaitExpired = at() - wait.firstPendingAt > boundMs;
+    this.#runs.recordEvidence(run.id, "ci-wait-observed", {
+      headSha: wait.headSha,
+      firstPendingAt: wait.firstPendingAt,
+      boundMs,
+      expired: ciWaitExpired,
+      unsatisfied: waitingContexts,
+    }, at());
     return {
       outcome: "waiting-ci",
       run,
       delivery,
-      message: ci.status === "none" ? "No CI result is available" : "CI is still pending",
+      message: waitingContexts.length > 0
+        ? `Required checks are not complete: ${waitingContexts.join(", ")}`
+        : ci.status === "none"
+          ? "No CI result is available"
+          : "CI is still pending",
+      ciWaitExpired,
     };
   }
 
@@ -321,6 +400,7 @@ export class DeliveryCoordinator {
       run,
       delivery: this.#runs.delivery(runId),
       message: error instanceof Error ? error.message : String(error),
+      ciWaitExpired: false,
     };
   }
 
@@ -337,8 +417,43 @@ export class DeliveryCoordinator {
       run: failed,
       delivery: this.#runs.delivery(run.id),
       message: reason,
+      ciWaitExpired: false,
     };
   }
+}
+
+function ciWaitBoundMs(request: DeliverTaskRequest): number {
+  const minutes = request.contract.delivery.maxCiWaitMinutes ??
+    request.maxCiWaitMinutes ??
+    DEFAULT_MAX_CI_WAIT_MINUTES;
+  return minutes * 60_000;
+}
+
+function reconcileRequiredChecks(
+  requiredChecks: string[],
+  observed: CiCheck[],
+): { waiting: string[]; failed: string[] } {
+  const buckets = new Map<string, CiCheckBucket>();
+  for (const check of observed) {
+    const existing = buckets.get(check.name);
+    if (existing === undefined || existing === "pass") {
+      buckets.set(check.name, check.bucket);
+    }
+  }
+  const waiting: string[] = [];
+  const failed: string[] = [];
+  for (const context of requiredChecks) {
+    const bucket = buckets.get(context);
+    if (bucket === "pass") {
+      continue;
+    }
+    if (bucket === "fail" || bucket === "cancel") {
+      failed.push(`${context} (${bucket})`);
+    } else {
+      waiting.push(`${context} (${bucket ?? "not reported"})`);
+    }
+  }
+  return { waiting, failed };
 }
 
 function validateRequest(run: RunRecord, request: DeliverTaskRequest): void {

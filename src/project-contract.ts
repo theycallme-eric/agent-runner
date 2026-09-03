@@ -32,6 +32,7 @@ export interface ProjectContract {
     provider: string;
     pullRequest: boolean;
     merge: "never" | "after-required-checks";
+    maxCiWaitMinutes?: number;
   };
 }
 
@@ -76,7 +77,12 @@ export function parseProjectContract(source: string): ProjectContract {
   exactKeys(execution, ["concurrency", "attempts", "timeoutMinutes"], "execution");
 
   const delivery = objectAt(root.delivery, "delivery");
-  allowedKeys(delivery, ["provider", "pullRequest", "merge"], ["pullRequest", "merge"], "delivery");
+  allowedKeys(
+    delivery,
+    ["provider", "pullRequest", "merge", "maxCiWaitMinutes"],
+    ["pullRequest", "merge"],
+    "delivery",
+  );
   const merge = mergePolicyAt(delivery.merge, "delivery.merge");
 
   return {
@@ -108,6 +114,14 @@ export function parseProjectContract(source: string): ProjectContract {
         : pluginIdAt(delivery.provider, "delivery.provider"),
       pullRequest: booleanAt(delivery.pullRequest, "delivery.pullRequest"),
       merge,
+      ...(delivery.maxCiWaitMinutes === undefined
+        ? {}
+        : {
+            maxCiWaitMinutes: positiveIntegerAt(
+              delivery.maxCiWaitMinutes,
+              "delivery.maxCiWaitMinutes",
+            ),
+          }),
     },
   };
 }

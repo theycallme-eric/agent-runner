@@ -154,7 +154,11 @@ test("automatically merges the exact verified head and completes its source task
   context.request.contract = automaticMergeContract;
   const publisher = fakePublisher(
     async (request) => pullRequest(request, "104"),
-    async () => ({ status: "passed", evidence: ["required check passed"] }),
+    async () => ({
+      status: "passed",
+      evidence: ["node-tests: pass"],
+      checks: [{ name: "node-tests", bucket: "pass" as const }],
+    }),
   );
   let mergeCalls = 0;
   publisher.validateAutomaticMerge = async () => ({
@@ -182,6 +186,132 @@ test("automatically merges the exact verified head and completes its source task
     assert.equal(mergeCalls, 1);
     assert.equal(context.runs.delivery(context.runId)?.draft, false);
     assert.equal(context.runs.delivery(context.runId)?.ciStatus, "passed");
+  } finally {
+    context.runs.close();
+  }
+});
+
+test("an unreported required context downgrades an apparent pass to waiting", async () => {
+  const context = setup();
+  context.request.contract = automaticMergeContract;
+  const publisher = fakePublisher(
+    async (request) => pullRequest(request, "105"),
+    async () => ({
+      status: "passed",
+      evidence: ["verify: pass"],
+      checks: [{ name: "verify", bucket: "pass" as const }],
+    }),
+  );
+  let mergeCalls = 0;
+  publisher.validateAutomaticMerge = async () => ({
+    evidence: ["strict protected branch"],
+    requiredChecks: ["node-tests", "verify"],
+  });
+  publisher.mergeVerified = async () => {
+    mergeCalls += 1;
+    throw new Error("automatic merge must not be attempted");
+  };
+  const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
+    now: tickingClock(),
+  });
+
+  try {
+    const result = await coordinator.deliver(context.request);
+
+    assert.equal(result.outcome, "waiting-ci");
+    assert.equal(result.run.state, "ci");
+    assert.equal(mergeCalls, 0);
+    assert.match(result.message ?? "", /node-tests/);
+    assert.equal(context.runs.delivery(context.runId)?.ciStatus, "pending");
+    const evidence = context.runs
+      .events(context.runId)
+      .filter((event) => event.type === "required-checks-incomplete");
+    assert.equal(evidence.length, 1);
+    assert.match(JSON.stringify(evidence[0]?.detail), /node-tests/);
+  } finally {
+    context.runs.close();
+  }
+});
+
+test("an apparent pass without check rows refuses to merge under the automatic policy", async () => {
+  const context = setup();
+  context.request.contract = automaticMergeContract;
+  const publisher = fakePublisher(
+    async (request) => pullRequest(request, "106"),
+    async () => ({ status: "passed", evidence: ["required check passed"] }),
+  );
+  let mergeCalls = 0;
+  publisher.validateAutomaticMerge = async () => ({
+    evidence: ["strict protected branch"],
+    requiredChecks: ["node-tests"],
+  });
+  publisher.mergeVerified = async () => {
+    mergeCalls += 1;
+    throw new Error("automatic merge must not be attempted");
+  };
+  const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
+    now: tickingClock(),
+  });
+
+  try {
+    const result = await coordinator.deliver(context.request);
+
+    assert.equal(result.outcome, "failed");
+    assert.equal(result.run.failureReason, "required-checks-unreported");
+    assert.equal(mergeCalls, 0);
+  } finally {
+    context.runs.close();
+  }
+});
+
+test("a bounded CI wait expires without failing or transitioning the run", async () => {
+  const context = setup();
+  context.request.contract = automaticMergeContract;
+  context.request.maxCiWaitMinutes = 5;
+  const checks: CiSnapshot[] = [
+    { status: "pending", evidence: ["node-tests: pending"], checks: [{ name: "node-tests", bucket: "pending" }] },
+    { status: "pending", evidence: ["node-tests: pending"], checks: [{ name: "node-tests", bucket: "pending" }] },
+    { status: "passed", evidence: ["node-tests: pass"], checks: [{ name: "node-tests", bucket: "pass" }] },
+  ];
+  const publisher = fakePublisher(async (request) => pullRequest(request, "107"), async () => {
+    const next = checks.shift();
+    assert.ok(next);
+    return next;
+  });
+  publisher.validateAutomaticMerge = async () => ({
+    evidence: ["strict protected branch"],
+    requiredChecks: ["node-tests"],
+  });
+  publisher.mergeVerified = async (_request, observed) => ({
+    pullRequest: { ...observed, draft: false, state: "merged" as const },
+    taskCompleted: true,
+    evidence: ["exact verified head merged"],
+  });
+  let now = 10_000_000;
+  const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
+    now: () => now,
+  });
+
+  try {
+    const first = await coordinator.deliver(context.request);
+    const startedAt = context.runs.ciWait(context.runId)?.firstPendingAt;
+    now += 6 * 60_000;
+    const expired = await coordinator.deliver(context.request);
+    const stillStartedAt = context.runs.ciWait(context.runId)?.firstPendingAt;
+    now += 60_000;
+    const completed = await coordinator.deliver(context.request);
+
+    assert.equal(first.outcome, "waiting-ci");
+    assert.equal(first.ciWaitExpired, false);
+    assert.ok(startedAt);
+    assert.equal(expired.outcome, "waiting-ci");
+    assert.equal(expired.ciWaitExpired, true);
+    assert.equal(expired.run.state, "ci");
+    assert.equal(expired.run.failureReason, null);
+    assert.equal(stillStartedAt, startedAt);
+    assert.equal(completed.outcome, "completed");
+    assert.equal(completed.ciWaitExpired, false);
+    assert.equal(context.runs.ciWait(context.runId), null);
   } finally {
     context.runs.close();
   }
@@ -257,7 +387,13 @@ function setup(changedPaths = ["src/app.ts"]): {
   runs: RunStore;
   runId: string;
   repository: WorkspaceRepository;
-  request: { runId: string; task: TaskNode; project: ProjectRegistration; contract: typeof contract };
+  request: {
+    runId: string;
+    task: TaskNode;
+    project: ProjectRegistration;
+    contract: typeof contract;
+    maxCiWaitMinutes?: number;
+  };
 } {
   const runs = new RunStore();
   const claim = runs.claim({

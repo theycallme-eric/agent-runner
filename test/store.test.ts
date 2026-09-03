@@ -178,3 +178,35 @@ test("an interrupted synchronization resumes in place within the attempt budget"
     store.close();
   }
 });
+
+test("a per-pull-request CI wait clock survives a controller restart", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-runner-ci-wait-"));
+  const databasePath = join(directory, "runs.sqlite");
+  const first = new RunStore(databasePath);
+  try {
+    const claimed = first.claim(request());
+    const runId = claimed.run.id;
+
+    const started = first.recordCiWait(runId, "head-a", 10_000);
+    const unchanged = first.recordCiWait(runId, "head-a", 20_000);
+    assert.equal(started.firstPendingAt, 10_000);
+    assert.equal(unchanged.firstPendingAt, 10_000);
+    assert.equal(first.ciWait(runId)?.headSha, "head-a");
+
+    const restarted = new RunStore(databasePath);
+    try {
+      assert.equal(restarted.ciWait(runId)?.firstPendingAt, 10_000);
+      const advanced = restarted.recordCiWait(runId, "head-b", 30_000);
+      assert.equal(advanced.firstPendingAt, 30_000);
+      assert.equal(advanced.headSha, "head-b");
+      restarted.clearCiWait(runId);
+      assert.equal(restarted.ciWait(runId), null);
+    } finally {
+      restarted.close();
+    }
+    assert.equal(first.ciWait(runId), null);
+  } finally {
+    first.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
