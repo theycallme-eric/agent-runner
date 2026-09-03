@@ -14,7 +14,9 @@ registers multiple independent product repositories and controller-owned worker 
 resolves ready work through pluggable task and dependency adapters, and enforces task uniqueness and
 per-project concurrency in SQLite. Registration canonicalizes both paths, rejects a contract inside
 the product, verifies the Git working-tree root, and checks GitHub-backed project identity against
-the repository's origin without changing the repository. The controller also simulates
+the repository's origin without changing the repository. A separately confirmed command can create
+an empty independent local and GitHub repository, push one empty initialization commit, and register
+it without adding support files. The controller also simulates
 controller-owned verification, base synchronization, CI, retries, and human gates. The concrete
 execution service connects a claim to an exact-base worktree, a selected worker adapter, independent
 commands, a locally committed verified head, and durable evidence. Real work can be launched
@@ -72,6 +74,9 @@ node dist/src/cli.js validate /path/to/project-workspace/runner/project.yml
 node dist/src/cli.js register /path/to/product-repo \
   --contract /path/to/project-workspace/runner/project.yml \
   --worker claude-fable
+node dist/src/cli.js create-project /path/to/new-product-repo \
+  --contract /path/to/project-workspace/runner/project.yml \
+  --worker claude-fable --visibility private --confirm-create
 node dist/src/cli.js status
 node dist/src/cli.js ready <project-id>
 node dist/src/cli.js profiles --profiles /path/to/workers.yml
@@ -85,6 +90,12 @@ the contract is inside the product, the path is not the Git root, or a GitHub-ba
 not match the GitHub origin. It does not copy the project, rewrite its requirements, or put
 agent/model selection in the product repository. Use `--state <path>` or
 `AGENT_RUNNER_STATE_PATH` to select a different controller database.
+
+`create-project` is the explicit alternative when no product repository exists. It requires a
+public/private visibility choice and `--confirm-create`, refuses non-empty non-repository folders and
+wrong remotes, creates no product files, and is idempotent after a successful run. It uses an empty
+initial commit only so the configured base branch exists for later isolated work. Actual GitHub
+creation is an owner-authorized operation; deterministic tests use a local fake remote.
 
 The built-in GitHub adapter reads issues and GitHub's native `blocked by` relationships. `ready` is
 read-only: it refreshes and validates the DAG but does not claim work or launch an agent.
@@ -145,5 +156,5 @@ should not receive Agent Runner code or required configuration files.
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License and public packaging are deferred; neither is required for the local workflow.
-- Next implementation gate: add explicit new-repository creation to external project setup, then
-  accept only published, owner-approved tasks through the existing task-provider boundary.
+- Next implementation gate: sync Requirements Builder issue drafts and native dependencies into a
+  review-only GitHub DAG. Agent Runner approval filtering remains later in the handoff sequence.

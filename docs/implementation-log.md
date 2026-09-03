@@ -4,6 +4,23 @@ Concise chronological handoff for humans and coding agents. Record material chan
 approaches, corrections, verification evidence, and the next open decision. Do not copy chat
 transcripts or secrets here.
 
+## 2026-09-02 — Add explicit independent repository creation
+
+- Added `create-project` as the explicit alternative to registering an existing product repository.
+  It requires the external project contract, worker profile, public/private visibility choice, and
+  `--confirm-create`; normal registration remains read-only.
+- The creation path refuses non-empty non-repository directories, an existing repository without an
+  origin, mismatched GitHub identity, and mismatched visibility. It creates no product files or
+  support-tool configuration.
+- A new repository receives one empty initialization commit so the configured base branch exists,
+  then the branch is pushed and the project is registered through the existing external contract.
+  Repeating the same successful request verifies and reuses the repository without creating or
+  pushing again.
+- Verification uses a fake GitHub executable plus a local bare Git remote; no live repository was
+  created. The complete deterministic Agent Runner suite passes 77 tests.
+- Next gate: implement review-only GitHub issue and dependency syncing from Requirements Builder
+  artifacts. Do not add unrelated Runner capabilities first.
+
 ## 2026-08-29 — Boundary and landscape
 
 - Kept CLEAR mid-flight and created this standalone repository for reusable orchestration.

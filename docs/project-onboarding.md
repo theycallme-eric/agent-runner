@@ -86,3 +86,26 @@ Registration, project status, profile listing, readiness, and `run-once --dry-ru
 product or launch a coding agent. Mutating execution begins only at explicit `run-once`, which
 consumes claims through the normalized worker interface and can publish drafts through the
 separately selected delivery adapter.
+
+## Explicit repository creation
+
+When a product repository does not exist, creation is a separate owner-authorized action:
+
+```text
+agent-runner create-project /path/to/new-product-repository \
+  --contract /path/to/project-workspace/runner/project.yml \
+  --worker <profile> --visibility <public|private> --confirm-create
+```
+
+The command requires the external contract first so the GitHub repository identity and base branch
+are explicit. It refuses a contract inside the product path, a non-empty non-repository folder, an
+existing repository without an origin, a mismatched origin, a mismatched GitHub identity, or a
+different visibility than requested. It creates an empty local Git repository, an empty
+initialization commit, the GitHub repository and origin, pushes the configured base branch, and
+registers the project. It does not add README, license, support-tooling files, or product
+configuration.
+
+Repeating the exact successful request verifies the same GitHub identity and visibility, observes
+the existing base branch, and reuses the registration without creating or pushing again. A real use
+still requires explicit owner authorization because it creates a remote repository; deterministic
+tests use a fake GitHub executable and local bare remote.

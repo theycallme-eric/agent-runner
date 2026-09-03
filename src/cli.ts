@@ -15,6 +15,9 @@ async function main(): Promise<void> {
     case "register":
       await registerCommand(argumentsList);
       return;
+    case "create-project":
+      await createProjectCommand(argumentsList);
+      return;
     case "projects":
     case "status":
       await projectsCommand(argumentsList);
@@ -33,6 +36,54 @@ async function main(): Promise<void> {
       return;
     default:
       usage();
+  }
+}
+
+async function createProjectCommand(argumentsList: string[]): Promise<void> {
+  const rootPath = argumentsList[0];
+  const contractPath = option(argumentsList, "--contract");
+  const workerProfile = option(argumentsList, "--worker");
+  const visibility = option(argumentsList, "--visibility");
+  if (
+    !rootPath ||
+    !contractPath ||
+    !workerProfile ||
+    (visibility !== "public" && visibility !== "private") ||
+    !argumentsList.includes("--confirm-create")
+  ) {
+    usage();
+    return;
+  }
+  const statePath = statePathFrom(argumentsList);
+  await mkdir(dirname(statePath), { recursive: true });
+  const [{ createProjectRepository }, { ProjectRegistryStore }] = await Promise.all([
+    import("./projects/onboarding.js"),
+    import("./projects/registry.js"),
+  ]);
+  const registry = new ProjectRegistryStore(statePath);
+  try {
+    const result = await createProjectRepository(registry, {
+      rootPath,
+      contractPath,
+      workerProfile,
+      visibility,
+      confirmed: true,
+      now: Date.now(),
+      gitExecutable: process.env.AGENT_RUNNER_GIT_BIN ?? "git",
+      ghExecutable: process.env.AGENT_RUNNER_GH_BIN ?? "gh",
+    });
+    print({
+      created: result.created,
+      repositoryCreated: result.repositoryCreated,
+      initialBranchPushed: result.initialBranchPushed,
+      project: result.project.id,
+      repositoryPath: result.project.rootPath,
+      contractPath: result.project.contractPath,
+      workerProfile: result.project.workerProfile,
+      enabled: result.project.enabled,
+    });
+  } finally {
+    registry.close();
   }
 }
 
@@ -409,6 +460,8 @@ function usage(): void {
   agent-runner validate <external-project-contract>
   agent-runner register <product-repository> --contract <external-project-contract>
     --worker <profile> [--state <database>]
+  agent-runner create-project <new-product-directory> --contract <external-project-contract>
+    --worker <profile> --visibility <public|private> --confirm-create [--state <database>]
   agent-runner projects [--state <database>]
   agent-runner status [--state <database>]
   agent-runner ready <project-id> [--state <database>]
