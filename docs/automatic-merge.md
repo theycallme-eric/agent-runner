@@ -22,14 +22,35 @@ base branch to have:
 
 - branch protection enabled;
 - strict, up-to-date branch checks;
-- at least one named required status check; and
+- at least one named required status check;
 - `enforce_admins` enabled ("Do not allow bypassing the above settings"), so protection binds every
-  token that can merge, including the owner's administrator token.
+  token that can merge, including the owner's administrator token; and
+- every required check provided by a specific GitHub App. A context added through the legacy
+  `contexts` list, or left without a reporting application, accepts a result from any source, so
+  the preflight refuses it by name and asks for an application to be configured.
 
 For each node, the controller still requires a clean isolated workspace, a non-empty committed
 change, independent task and project verification, no protected-path gate, an unchanged base, and a
 passing required CI result. The GitHub adapter then marks the exact persisted draft ready and uses an
 exact-head guard while squash-merging. It rechecks branch protection immediately before merging.
+
+## What counts as a passing required check
+
+A required context is satisfied only by a check run that carries all four of: the required context
+name, the GitHub App branch protection pins that context to, the exact verified head commit, and a
+completed successful result. The evidence comes from the check-runs API for that commit rather than
+from `gh pr checks`, because only the former reports the reporting application and the head it ran
+against. A commit status is therefore never accepted as proof, and a listing that is too large to
+read in one page proves nothing rather than being trusted as far as it goes.
+
+Marking a draft ready can itself trigger a `ready_for_review` workflow, and GitHub does not promise
+that such a run exists by the time the ready request returns. The adapter therefore stops after
+marking the draft ready and merges no earlier than a later pass, and the controller discards the
+first required-check reading taken after that transition. A required check that does not rerun on
+the ready event is unaffected: its earlier result is still the latest run for that context on the
+same head, so the node merges once the settling reading is taken. The equivalent window for a new
+commit is already closed by matching the head, because a commit whose runs have not registered
+carries no earlier pass to mistake for a current one.
 
 Only after GitHub reports that exact pull request head as merged does the adapter close the numeric
 source issue as completed. Closing the issue refreshes the native DAG on the next pass, allowing its
@@ -39,7 +60,9 @@ node.
 
 ## Reasons the run stops
 
-The Runner does not merge when required checks are absent, pending, or failed; the base or pull
+The Runner does not merge when required checks are absent, pending, failed, reported by an
+application other than the configured one, or reported against a commit other than the verified
+head; the base or pull
 request identity changed; verification failed; a protected path or explicit human gate was reached;
 the worker or provider is unavailable; retries are exhausted; or the bounded unattended session has
 reached its time, claim, or no-progress limit. Retryable GitHub delivery errors remain in durable

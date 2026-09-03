@@ -621,3 +621,51 @@ transcripts or secrets here.
   exit non-zero is an owner call. `docs/autopilot.md`'s stop-condition list still omits
   `ci-wait-timeout` because the package assigned that line to `docs/automatic-merge.md` alone.
   `AGENTS.md` remains stale about automatic merging (R-18), and the rest of R-13 is untouched.
+
+## 2026-09-03 — Required-check source proof and the post-ready reading
+
+- Branch protection is now read as a list of required contexts with the GitHub App each is pinned
+  to. `required_status_checks.checks[].app_id` is preserved instead of discarded, and the legacy
+  `contexts` array is read as pinned to nothing. Automatic merge refuses at the pre-claim preflight,
+  dry runs included, when any required context has no reporting application, because GitHub accepts
+  such a context from any source.
+- Required contexts are now observed through `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`
+  rather than `gh pr checks`, because only the check-runs reading carries the reporting application
+  and the commit the result ran against. One shared decision function satisfies a context only when
+  the name, the pinned application, the exact verified head, and a passing result all agree.
+  `gh pr checks` remains the reading for `merge: never` projects, whose behavior is unchanged.
+- Consequences that are deliberate rather than accidental: a commit status is never proof, because
+  the check-runs endpoint does not report one; and a listing whose `total_count` exceeds the page
+  read proves nothing, because the run that would contradict a pass may be on a page never seen.
+  Both fail closed and wait rather than merging.
+- The adapter no longer merges in the invocation that marks a draft ready. It returns a new waiting
+  outcome, the coordinator records it and keeps the run deliverable, and the first required-check
+  reading taken after that transition is discarded before a merge is allowed.
+- Evidence for that boundary. `ready_for_review` is a `pull_request` activity type but not one of
+  the defaults (`opened`, `synchronize`, `reopened`), so it only triggers a workflow that names it.
+  Nothing in GitHub's documentation promises that such a run has registered when the ready request
+  returns, and `filter=latest` returns the most recent run per name, so before registration the
+  older pass is still the latest one. No API reports "a run is about to be created", so no
+  synchronous guarantee is available and the boundary is a settling pass rather than a proof.
+- Why the same window does not exist for a new commit: results are matched to the exact verified
+  head, so a commit whose runs have not registered carries no earlier pass to mistake for a current
+  one. Only the ready transition can leave a genuine same-head pass in place while a rerun is
+  pending, which is why the settling reading is scoped to it.
+- What failed on the way. The truncation guard first lived only in the snapshot builder, so the
+  merge path bypassed it; the completeness decision now sits in one function used by both. Counting
+  deferral events made a queued check cost an extra pass, so the settle now counts observations
+  recorded after the ready event instead. Two new tests asserted a call counter after the whole
+  sequence had run rather than between passes, and passed for the wrong reason until corrected.
+  Every in-memory publisher fake had to state the reporting application and head of its rows, and
+  the GitHub fakes had to serve check runs; no assertion was weakened to accommodate them.
+- Known limitations, none of them closed here. If a `ready_for_review` run registers later than the
+  settling pass, a stale same-head pass can still authorize the merge; GitHub's own evaluation of
+  required checks at merge time, bound by `enforce_admins`, remains the backstop. A crash between
+  the ready request and the recorded deferral loses the settling boundary for that run. The settle
+  is one observation and is not configurable. A project whose required context is delivered as a
+  commit status will wait until the CI-wait bound stops the session, which is fail-closed but will
+  read as a hang until the operator sees the named context.
+- Evidence: TypeScript checks pass for both tools; agent-runner 114 tests pass, up from 104 at
+  `08abb94`; requirements-builder 32 tests pass; `node scripts/verify-all.mjs` reports every tool
+  green. All coverage uses the fake `gh`/`git` scripts or in-memory fakes. No live GitHub state, no
+  product repository, and no other support tool was touched.
