@@ -134,6 +134,46 @@ test("reports a fully drained DAG as completed", async () => {
   }
 });
 
+test("reports completed when final tasks finish on the exact new-claim ceiling", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      const result = resultFixture(request.projectId, "worker-a", true);
+      result.claimed = result.claimed.map((item) => ({
+        ...item,
+        state: "completed",
+        delivery: "completed",
+        ciStatus: "passed",
+      }));
+      return result;
+    },
+  });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "completed-at-ceiling",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 2,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+
+    assert.equal(result.stopReason, "completed");
+    assert.equal(result.totalNewClaims, 2);
+    assert.deepEqual(result.report.remaining, [
+      { projectId: "fixture/one", ready: [], waiting: [], blocked: [] },
+      { projectId: "fixture/two", ready: [], waiting: [], blocked: [] },
+    ]);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
 test("quarantines a human-gated branch and continues until the bounded no-progress stop", async () => {
   const projects = projectsFixture();
   const runs = new RunStore();

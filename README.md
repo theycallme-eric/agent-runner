@@ -193,6 +193,6 @@ configuration files.
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License and public packaging are deferred; neither is required for the local workflow.
-- WP-09 is implemented locally and covered by deterministic tests. A separately authorized
-  adversarial disposable GitHub proof remains the final live release check before selecting a real
-  product; no live repository was changed by the local implementation.
+- WP-09 is implemented, covered by deterministic tests, and passed its separately authorized
+  disposable GitHub release proof. The next workflow stage is an explicitly owner-selected real
+  product; no real product repository was changed by WP-09 or its QA.

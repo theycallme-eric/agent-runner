@@ -204,11 +204,7 @@ export class AutopilotController {
       ));
       if (
         projectResults.length === enabledProjects.length &&
-        projectResults.every((result) =>
-          result.ready.length === 0 &&
-          result.waiting.length === 0 &&
-          result.blocked.length === 0
-        ) &&
+        projectResults.every((result) => hasNoRemainingWork(result)) &&
         !inFlight
       ) {
         stopReason = "completed";
@@ -289,9 +285,7 @@ export class AutopilotController {
       runs: rows,
       remaining: [...latest.entries()].map(([projectId, result]) => ({
         projectId,
-        ready: result.ready.map((task) => task.id),
-        waiting: result.waiting,
-        blocked: result.blocked,
+        ...remainingWork(result),
       })),
       ciWaitTimeouts: uniqueCiWaitTimeouts([...latest.entries()].flatMap(([projectId, result]) =>
         [...result.claimed, ...result.reconciled]
@@ -313,6 +307,28 @@ export class AutopilotController {
       })),
     };
   }
+}
+
+function hasNoRemainingWork(result: RunOnceResult): boolean {
+  const remaining = remainingWork(result);
+  return remaining.ready.length === 0 && remaining.waiting.length === 0 && remaining.blocked.length === 0;
+}
+
+function remainingWork(result: RunOnceResult): {
+  ready: string[];
+  waiting: string[];
+  blocked: string[];
+} {
+  const completedDuringPass = new Set(
+    [...result.claimed, ...result.reconciled]
+      .filter((item) => item.state === "completed" || item.delivery === "completed")
+      .map((item) => item.taskId),
+  );
+  return {
+    ready: result.ready.map((task) => task.id).filter((taskId) => !completedDuringPass.has(taskId)),
+    waiting: result.waiting.filter((taskId) => !completedDuringPass.has(taskId)),
+    blocked: result.blocked.filter((taskId) => !completedDuringPass.has(taskId)),
+  };
 }
 
 function madeMaterialProgress(result: RunOnceResult): boolean {

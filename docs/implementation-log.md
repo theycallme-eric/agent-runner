@@ -4,6 +4,39 @@ Concise chronological handoff for humans and coding agents. Record material chan
 approaches, corrections, verification evidence, and the next open decision. Do not copy chat
 transcripts or secrets here.
 
+## 2026-09-04 — Complete the WP-09 disposable GitHub release proof
+
+- Created the separately authorized public `theycallme-eric/workflow-wp09-proof` repository as
+  disposable QA, with all controller inputs, handoff, worker configuration, state, and worktrees kept
+  in its external support workspace. The product repository received only its own fixture files and
+  the explicitly previewed product-owned verification workflow.
+- Proved the unsafe starting state fails closed: the first Runner dry run stopped on absent branch
+  protection before any claim or pull request. The repository-setup preview/apply path then created
+  the single `project-verification` GitHub Actions producer, app-pinned required check, strict branch
+  protection, administrator enforcement, and no required approving reviews. The independent Runner
+  dry run passed with exactly TASK-001 and TASK-002 ready.
+- The first two tasks ran in parallel at zero model cost and created ready, non-draft PRs #6 and #7.
+  A transient GitHub 504 during an earlier preflight caused no claim or remote task mutation. A
+  deliberate controller handoff while live leases remained refused takeover; resuming with the
+  persisted controller identity reused the same workers and PRs, merged both exact heads after CI,
+  and closed their source issues.
+- The disposable JSON worker initially matched a blocker ID instead of the current ID for TASK-003
+  and TASK-004. Agent Runner rejected both false success reports as `worker-no-changes`, published no
+  PR, and quarantined the task-local failures. The failed database was preserved; after correcting
+  only the external fixture parser, a fresh controller state read the same approved GitHub graph,
+  kept TASK-001 and TASK-002 completed, and executed only the open tasks.
+- Recovery PRs #8 and #9 ran in parallel and merged after exact required checks. Their issue closures
+  unlocked TASK-005; PR #10 then passed, merged, and closed the final issue. GitHub ended with all
+  five approved issues closed, all five task PRs non-draft and merged, protection intact, and the
+  final dry run reporting every task completed. Worker cost was zero and no LLM was called.
+- The live run exposed one non-safety reporting defect when the final task completed on the exact
+  `--max-new-claims` boundary: the task was remotely complete, but the final report retained the
+  pass's pre-reconciliation `ready` snapshot and stopped as `max-new-claims`. The scheduler now
+  subtracts tasks completed during that pass when deciding and rendering remaining work. A focused
+  regression proves this exact boundary reports `completed`; the full Agent Runner suite passes 129
+  tests. The root verifier also passes the Requirements Builder suite, setup-skill recovery checks,
+  DAG Viewer integration, Agent Runner suite, and versioned producer-to-consumer handoff.
+
 ## 2026-09-03 — Closeout documentation reconciliation
 
 - Reconciled the worker boundary documentation with the completed live acceptance proof: Fable is
