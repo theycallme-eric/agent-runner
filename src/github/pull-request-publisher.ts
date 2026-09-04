@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { reconcileRequiredChecks } from "../delivery/required-checks.js";
+import { preflightGitHubActions, type WorkflowSource } from "./actions-preflight.js";
 import type {
   AutomaticMergeResult,
   AutomaticMergeValidation,
@@ -57,6 +58,12 @@ interface RawCheckRun {
 interface RawBranchProtection {
   required_status_checks?: unknown;
   enforce_admins?: unknown;
+  required_pull_request_reviews?: unknown;
+}
+
+interface RawContentsEntry {
+  path?: unknown;
+  type?: unknown;
 }
 
 interface RawIssue {
@@ -96,12 +103,11 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     let pullRequests = await this.#list(request);
     if (pullRequests.length === 0) {
       try {
-        await this.#gh([
+        const createArguments = [
           "pr",
           "create",
           "--repo",
           request.repository,
-          "--draft",
           "--base",
           request.baseBranch,
           "--head",
@@ -110,7 +116,9 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
           request.title,
           "--body",
           request.body,
-        ]);
+        ];
+        if (request.draft) createArguments.splice(4, 0, "--draft");
+        await this.#gh(createArguments);
       } catch (error) {
         pullRequests = await this.#list(request);
         if (pullRequests.length === 0) {
@@ -181,8 +189,8 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
     if (!before || !samePullRequest(before, expected)) {
       throw new Error(`Pull request ${expected.externalId} changed before draft update`);
     }
-    if (before.state !== "open" || !before.draft) {
-      throw new Error(`Pull request ${expected.externalId} is not an open draft`);
+    if (before.state !== "open" || before.draft !== request.draft) {
+      throw new Error(`Pull request ${expected.externalId} does not match the requested review mode`);
     }
     const localHead = await this.#git(request.workspacePath, ["rev-parse", "HEAD"]);
     if (localHead !== request.headSha) {
@@ -254,6 +262,12 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
           "every token that can merge, including administrators",
       );
     }
+    if (protection.requiredApprovingReviewCount > 0) {
+      throw new Error(
+        `Automatic merge cannot satisfy ${protection.requiredApprovingReviewCount} required approving ` +
+          `review(s) on ${baseBranch}; use merge: never for human-reviewed work`,
+      );
+    }
     const unpinned = protection.requiredChecks
       .filter((check) => check.appId === null)
       .map((check) => check.context);
@@ -264,11 +278,20 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
           `Configure a reporting application for: ${unpinned.join(", ")}`,
       );
     }
+    const workflows = await this.#workflowSources(repository, baseBranch);
+    const workflowPreflight = preflightGitHubActions(protection.requiredChecks, workflows);
+    if (workflowPreflight.failures.length > 0) {
+      throw new Error(
+        "Automatic merge cannot prove a single safe GitHub Actions producer for every required " +
+          `check on ${baseBranch}: ${workflowPreflight.failures.join("; ")}`,
+      );
+    }
     return {
       evidence: [
         `Protected base branch: ${baseBranch}`,
         `Required checks: ${describeRequiredChecks(protection.requiredChecks)}`,
         "Administrators cannot bypass required checks",
+        ...workflowPreflight.evidence,
       ],
       requiredChecks: protection.requiredChecks,
     };
@@ -319,35 +342,10 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
 
     if (observed.state === "open") {
       if (observed.draft) {
-        await this.#gh([
-          "pr",
-          "ready",
-          observed.externalId,
-          "--repo",
-          request.repository,
-        ]);
-        const ready = await this.inspectPullRequest(request.repository, observed.externalId);
-        if (!ready) {
-          throw new Error(`Pull request ${observed.externalId} disappeared after becoming ready`);
-        }
-        assertPullRequestIdentity(request, ready);
-        if (ready.state !== "open" || ready.draft) {
-          throw new Error(`Pull request ${ready.externalId} did not become merge-ready`);
-        }
-        return {
-          outcome: "waiting",
-          pullRequest: ready,
-          reason:
-            "The pull request was marked ready for review during this pass. GitHub does not " +
-            "guarantee that a ready_for_review workflow has registered when that request " +
-            "returns, so required checks are re-observed on a later pass and no result read " +
-            "before the transition can authorize the merge.",
-          evidence: [
-            ...evidence,
-            `Marked pull request ${ready.externalId} ready for review at verified head ` +
-              request.headSha,
-          ],
-        };
+        throw new Error(
+          `Automatic-merge pull request ${observed.externalId} is unexpectedly draft; ` +
+            "the runner will not change review mode after creation",
+        );
       }
       const observed_checks = await this.#observeRequired(request, validation.requiredChecks);
       const unsatisfied = observed_checks.unproven;
@@ -412,6 +410,28 @@ export class GitHubPullRequestPublisher implements PullRequestPublisher {
       "2",
     ]);
     return parsePullRequests(output);
+  }
+
+  async #workflowSources(repository: string, baseBranch: string): Promise<WorkflowSource[]> {
+    const directoryEndpoint =
+      `repos/${repository}/contents/.github/workflows?ref=${encodeURIComponent(baseBranch)}`;
+    const entries = parseWorkflowDirectory(await this.#gh([
+      "api",
+      directoryEndpoint,
+      "--header",
+      "X-GitHub-Api-Version: 2026-03-10",
+    ]));
+    return Promise.all(entries.map(async (path) => ({
+      path,
+      source: await this.#gh([
+        "api",
+        `repos/${repository}/contents/${path}?ref=${encodeURIComponent(baseBranch)}`,
+        "--header",
+        "Accept: application/vnd.github.raw+json",
+        "--header",
+        "X-GitHub-Api-Version: 2026-03-10",
+      ]),
+    })));
   }
 
   async #completeIssue(repository: string, sourceId: string): Promise<boolean> {
@@ -724,6 +744,7 @@ export function parseBranchProtection(source: string): {
   strict: boolean;
   requiredChecks: RequiredCheck[];
   enforceAdmins: boolean;
+  requiredApprovingReviewCount: number;
 } {
   const value = JSON.parse(source) as unknown;
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -767,7 +788,37 @@ export function parseBranchProtection(source: string): {
       .map(([context, appId]) => ({ context, appId }))
       .sort((left, right) => left.context.localeCompare(right.context)),
     enforceAdmins: parseEnforceAdmins(raw.enforce_admins),
+    requiredApprovingReviewCount: parseRequiredReviewCount(raw.required_pull_request_reviews),
   };
+}
+
+export function parseWorkflowDirectory(source: string): string[] {
+  const value = JSON.parse(source) as unknown;
+  if (!Array.isArray(value)) {
+    throw new Error("GitHub workflow directory response must be an array");
+  }
+  return value.flatMap((entry, index) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error(`workflow directory entry ${index} must be an object`);
+    }
+    const raw = entry as RawContentsEntry;
+    if (raw.type !== "file") return [];
+    const path = stringValue(raw.path, `workflow directory entry ${index}.path`);
+    return /\.ya?ml$/i.test(path) ? [path] : [];
+  }).sort((left, right) => left.localeCompare(right));
+}
+
+function parseRequiredReviewCount(value: unknown): number {
+  if (value === undefined || value === null) return 0;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("GitHub branch protection required_pull_request_reviews must be an object");
+  }
+  const count = (value as { required_approving_review_count?: unknown })
+    .required_approving_review_count;
+  if (!Number.isInteger(count) || (count as number) < 0) {
+    throw new Error("required_pull_request_reviews.required_approving_review_count must be non-negative");
+  }
+  return count as number;
 }
 
 function applicationId(value: unknown, path: string): number | null {

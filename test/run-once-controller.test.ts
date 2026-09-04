@@ -105,7 +105,7 @@ delivery: { provider: fixture, pullRequest: true, merge: never }
   }
 });
 
-test("an unpinned required check fails the automatic-merge preflight before any claim", async () => {
+test("automatic merge protects CI workflows before checking the required-check provider", async () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-runner-unpinned-preflight-"));
   const productPath = join(directory, "product");
   const contractPath = join(directory, "runner", "project.yml");
@@ -192,6 +192,20 @@ delivery: { provider: fixture, pullRequest: true, merge: after-required-checks }
   };
 
   try {
+    await assert.rejects(controller.run(request), /protectedPaths.*\.github\/workflows/);
+    assert.equal(validations, 0);
+    writeFileSync(contractPath, `version: 1
+project: { id: fixture/unpinned, baseBranch: main }
+tasks: { provider: fixture, dependencies: fixture }
+workspace: { setup: [] }
+verification:
+  required: [node --test]
+  protectedPaths:
+    - pattern: .github/workflows/**
+      gate: human
+execution: { concurrency: 1, attempts: 2, timeoutMinutes: 10 }
+delivery: { provider: fixture, pullRequest: true, merge: after-required-checks }
+`);
     await assert.rejects(controller.run(request), /specific GitHub App/);
     await assert.rejects(controller.run({ ...request, dryRun: true }), /legacy-status/);
 
@@ -204,3 +218,110 @@ delivery: { provider: fixture, pullRequest: true, merge: after-required-checks }
   }
 });
 
+test("a missing approved runtime prerequisite blocks only its affected ready task", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-runner-prerequisite-gate-"));
+  const productPath = join(directory, "product");
+  const contractPath = join(directory, "runner", "project.yml");
+  mkdirSync(productPath);
+  mkdirSync(join(directory, "runner"));
+  writeFileSync(contractPath, `version: 1
+project: { id: fixture/prerequisite, baseBranch: main }
+tasks: { provider: fixture, dependencies: fixture }
+workspace: { setup: [] }
+verification: { required: [node --test], protectedPaths: [] }
+execution: { concurrency: 2, attempts: 2, timeoutMinutes: 10 }
+delivery: { provider: fixture, pullRequest: true, merge: never }
+`);
+  const projects = new ProjectRegistryStore();
+  const runs = new RunStore();
+  const providers = new TaskProviderRegistry();
+  const dependencies = new DependencyResolverRegistry();
+  const workers = new WorkerProfileRegistry();
+  const publishers = new PullRequestPublisherRegistry();
+  projects.register({
+    id: "fixture/prerequisite",
+    rootPath: productPath,
+    contractPath,
+    workerProfile: "fixture",
+    contractVersion: 1,
+    now: 1,
+  });
+  providers.register({
+    name: "fixture",
+    listTasks: async () => [
+      {
+        id: "TASK-BLOCKED",
+        sourceId: "1",
+        revision: "revision-a",
+        title: "Needs service",
+        prompt: "Do not run",
+        status: "pending",
+        dependencies: [],
+        executionPrerequisites: [{ id: "PRE-001", verificationCommand: "service-ready" }],
+      },
+      {
+        id: "TASK-INDEPENDENT",
+        sourceId: "2",
+        revision: "revision-b",
+        title: "Independent",
+        prompt: "Do not run",
+        status: "pending",
+        dependencies: [],
+      },
+    ],
+  });
+  dependencies.register({ name: "fixture", resolve: async (tasks) => tasks });
+  workers.register("fixture", { name: "fixture", run: async () => {
+    throw new Error("worker must not run in dry run");
+  } });
+  publishers.register({
+    name: "fixture",
+    publishDraft: async () => { throw new Error("must not publish"); },
+    inspectPullRequest: async () => null,
+    updateDraft: async () => { throw new Error("must not update"); },
+    checkCi: async () => { throw new Error("must not inspect CI"); },
+  });
+  const unused = async () => { throw new Error("unused fixture dependency"); };
+  const controller = new RunOnceController(
+    projects,
+    runs,
+    new ProjectPlanner(runs, providers, dependencies),
+    workers,
+    { create: unused },
+    { resolveRef: unused, snapshot: unused, commit: unused, synchronize: unused },
+    { inspect: async () => "a".repeat(40), refresh: async () => "a".repeat(40) },
+    publishers,
+    {
+      run: async ({ command }) => ({
+        command,
+        passed: command !== "service-ready",
+        exitCode: command === "service-ready" ? 1 : 0,
+        stdout: "",
+        stderr: "",
+        durationMs: 1,
+      }),
+    },
+  );
+
+  try {
+    const result = await controller.run({
+      projectId: "fixture/prerequisite",
+      controllerId: "fixture-controller",
+      leaseDurationMs: 1_000,
+      maxClaims: 2,
+      dryRun: true,
+      targetTaskId: null,
+    });
+    assert.deepEqual(result.ready.map((task) => task.id), ["TASK-INDEPENDENT"]);
+    assert.deepEqual(result.blocked, ["TASK-BLOCKED"]);
+    assert.deepEqual(result.prerequisiteBlocks, [{
+      taskId: "TASK-BLOCKED",
+      prerequisiteIds: ["PRE-001"],
+    }]);
+    assert.deepEqual(runs.listProject("fixture/prerequisite"), []);
+  } finally {
+    runs.close();
+    projects.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

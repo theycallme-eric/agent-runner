@@ -15,6 +15,10 @@ export interface TaskNode {
   sourceRefs?: string[];
   acceptanceCriteria?: string[];
   verificationExpectations?: string[];
+  executionPrerequisites?: Array<{
+    id: string;
+    verificationCommand: string;
+  }>;
 }
 
 export interface TaskProvider {

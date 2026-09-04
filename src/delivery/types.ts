@@ -13,6 +13,8 @@ export interface DraftPullRequestRequest {
   headSha: string;
   title: string;
   body: string;
+  /** Human-review work stays draft; unattended automatic-merge work is ready at creation. */
+  draft: boolean;
 }
 
 export interface PullRequestSnapshot {

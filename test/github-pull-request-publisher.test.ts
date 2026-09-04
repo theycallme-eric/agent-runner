@@ -88,6 +88,7 @@ test("requires strict branch protection with named checks and a real issue sourc
     strict: true,
     requiredChecks: [{ context: "node-tests", appId: 15368 }],
     enforceAdmins: false,
+    requiredApprovingReviewCount: 0,
   });
   assert.deepEqual(parseBranchProtection(JSON.stringify({
     required_status_checks: { strict: true, contexts: ["node-tests"] },
@@ -159,7 +160,7 @@ test("merges only the exact verified head on a protected branch and closes its t
   chmodSync(gh, 0o755);
   chmodSync(git, 0o755);
   const publisher = new GitHubPullRequestPublisher({ ghExecutable: gh, gitExecutable: git });
-  const request = fixtureRequest(directory);
+  const request = fixtureRequest(directory, false);
 
   try {
     const draft = await publisher.publishDraft(request);
@@ -167,9 +168,6 @@ test("merges only the exact verified head on a protected branch and closes its t
       request.repository,
       request.baseBranch,
     );
-    const readied = await publisher.mergeVerified(request, draft);
-    assert.equal(readied.outcome, "waiting");
-    assert.doesNotMatch(readFileSync(calls, "utf8"), /^gh merge/m);
     const result = await publisher.mergeVerified(request, draft);
     assert.equal(result.outcome, "merged");
     if (result.outcome !== "merged") throw new Error("unreachable");
@@ -179,13 +177,14 @@ test("merges only the exact verified head on a protected branch and closes its t
       "Protected base branch: main",
       "Required checks: node-tests (app 15368)",
       "Administrators cannot bypass required checks",
+      "Required context node-tests has one static GitHub Actions producer in .github/workflows/project-verification.yml, triggered on pull_request opened and synchronize",
     ]);
     assert.deepEqual(protection.requiredChecks, [{ context: "node-tests", appId: NODE_TESTS_APP }]);
     assert.equal(result.pullRequest.state, "merged");
     assert.equal(result.pullRequest.draft, false);
     assert.equal(result.pullRequest.headSha, "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678");
     assert.equal(result.taskCompleted, true);
-    assert.match(log, /^gh ready$/m);
+    assert.doesNotMatch(log, /^gh ready$/m);
     assert.match(log, /^gh merge a1b2c3d4e5f60718293a4b5c6d7e8f9012345678$/m);
     assert.match(log, /^gh close issue 1$/m);
   } finally {
@@ -260,6 +259,21 @@ test("requires branch protection to bind administrators before automatic merge",
   }
 });
 
+test("refuses required approving reviews in the unattended automatic lane", async () => {
+  const fixture = publisherFixture("agent-runner-github-required-reviews-", {
+    requiredApprovingReviewCount: 1,
+  });
+  try {
+    await assert.rejects(
+      fixture.publisher.validateAutomaticMerge("example/repo", "main"),
+      /cannot satisfy 1 required approving review/,
+    );
+    assert.doesNotMatch(fixture.log(), /^gh merge/m);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("refuses to merge unless every required context reported a passing check", async () => {
   const partial = publisherFixture("agent-runner-github-partial-checks-", {
     requiredChecks: [
@@ -276,7 +290,6 @@ test("refuses to merge unless every required context reported a passing check", 
   });
   try {
     const draft = await partial.publisher.publishDraft(partial.request);
-    await partial.publisher.mergeVerified(partial.request, draft);
     await assert.rejects(
       partial.publisher.mergeVerified(partial.request, draft),
       /node-tests/,
@@ -284,7 +297,6 @@ test("refuses to merge unless every required context reported a passing check", 
     assert.doesNotMatch(partial.log(), /^gh merge/m);
 
     const skippedDraft = await skipped.publisher.publishDraft(skipped.request);
-    await skipped.publisher.mergeVerified(skipped.request, skippedDraft);
     await assert.rejects(
       skipped.publisher.mergeVerified(skipped.request, skippedDraft),
       /node-tests/,
@@ -292,7 +304,6 @@ test("refuses to merge unless every required context reported a passing check", 
     assert.doesNotMatch(skipped.log(), /^gh merge/m);
 
     const cancelledDraft = await cancelled.publisher.publishDraft(cancelled.request);
-    await cancelled.publisher.mergeVerified(cancelled.request, cancelledDraft);
     await assert.rejects(
       cancelled.publisher.mergeVerified(cancelled.request, cancelledDraft),
       /node-tests/,
@@ -305,42 +316,56 @@ test("refuses to merge unless every required context reported a passing check", 
   }
 });
 
-test("re-observes required checks after the draft becomes ready and before merging", async () => {
-  const fixture = publisherFixture("agent-runner-github-post-ready-checks-", {
-    checkRunsBeforeReady: [],
-  });
+test("a conflicting exact-identity check row overrides a passing duplicate at final merge", async () => {
+  const cases = [
+    { bucket: "fail", status: "completed", conclusion: "failure" },
+    { bucket: "cancel", status: "completed", conclusion: "cancelled" },
+    { bucket: "pending", status: "in_progress", conclusion: null },
+    { bucket: "skipping", status: "completed", conclusion: "skipped" },
+  ] as const;
+  for (const current of cases) {
+    const fixture = publisherFixture(`agent-runner-github-conflicting-${current.bucket}-`, {
+      checkRuns: [checkRun(), checkRun({ status: current.status, conclusion: current.conclusion })],
+    });
+    try {
+      const readyPullRequest = await fixture.publisher.publishDraft(fixture.request);
+      await assert.rejects(
+        fixture.publisher.mergeVerified(fixture.request, readyPullRequest),
+        new RegExp(`node-tests \\(${current.bucket}\\)`),
+      );
+      assert.doesNotMatch(fixture.log(), /^gh merge/m);
+    } finally {
+      fixture.cleanup();
+    }
+  }
+});
+
+test("observes exact required checks after creating a ready pull request and before merging", async () => {
+  const fixture = publisherFixture("agent-runner-github-ready-checks-");
   try {
-    const draft = await fixture.publisher.publishDraft(fixture.request);
-    const beforeReady = await fixture.publisher.observeRequiredChecks(
-      fixture.request,
-      [{ context: "node-tests", appId: NODE_TESTS_APP }],
-    );
-    await fixture.publisher.mergeVerified(fixture.request, draft);
-    const result = await fixture.publisher.mergeVerified(fixture.request, draft);
+    const readyPullRequest = await fixture.publisher.publishDraft(fixture.request);
+    assert.equal(readyPullRequest.draft, false);
+    const result = await fixture.publisher.mergeVerified(fixture.request, readyPullRequest);
     if (result.outcome !== "merged") throw new Error("the merge pass did not merge");
     const lines = fixture.log().trimEnd().split("\n");
-    const ready = lines.indexOf("gh ready");
     const merge = lines.findIndex((line) => line.startsWith("gh merge"));
-    const observed = lines.findIndex((line, index) => line === "gh check-runs" && index > ready);
+    const observed = lines.findIndex((line) => line === "gh check-runs");
 
-    assert.equal(beforeReady.status, "none");
     assert.equal(result.pullRequest.state, "merged");
-    assert.ok(ready >= 0, "the draft was never marked ready");
-    assert.ok(observed > ready, "required checks were not re-observed after the draft became ready");
+    assert.doesNotMatch(fixture.log(), /^gh ready$/m);
+    assert.ok(observed >= 0, "required checks were not observed");
     assert.ok(merge > observed, "the merge did not follow the post-ready check observation");
   } finally {
     fixture.cleanup();
   }
 });
 
-test("refuses to merge when required checks are still pending after the draft becomes ready", async () => {
-  const fixture = publisherFixture("agent-runner-github-post-ready-pending-", {
-    checkRunsBeforeReady: [],
+test("refuses to merge when required checks are still pending on a ready pull request", async () => {
+  const fixture = publisherFixture("agent-runner-github-ready-pending-", {
     checkRuns: [checkRun({ status: "in_progress", conclusion: null })],
   });
   try {
     const draft = await fixture.publisher.publishDraft(fixture.request);
-    await fixture.publisher.mergeVerified(fixture.request, draft);
     await assert.rejects(
       fixture.publisher.mergeVerified(fixture.request, draft),
       /node-tests/,
@@ -408,7 +433,6 @@ test("a passing check from the wrong application cannot merge", async () => {
   });
   try {
     const draft = await impostor.publisher.publishDraft(impostor.request);
-    await impostor.publisher.mergeVerified(impostor.request, draft);
     await assert.rejects(
       impostor.publisher.mergeVerified(impostor.request, draft),
       /node-tests \(reported by application 99, not by required application 15368\)/,
@@ -416,7 +440,6 @@ test("a passing check from the wrong application cannot merge", async () => {
     assert.doesNotMatch(impostor.log(), /^gh merge/m);
 
     const anonymousDraft = await anonymous.publisher.publishDraft(anonymous.request);
-    await anonymous.publisher.mergeVerified(anonymous.request, anonymousDraft);
     await assert.rejects(
       anonymous.publisher.mergeVerified(anonymous.request, anonymousDraft),
       /node-tests \(reported by an unidentified source/,
@@ -434,7 +457,6 @@ test("a passing check from the right application on another head cannot merge", 
   });
   try {
     const draft = await stale.publisher.publishDraft(stale.request);
-    await stale.publisher.mergeVerified(stale.request, draft);
     await assert.rejects(
       stale.publisher.mergeVerified(stale.request, draft),
       /not on the verified head/,
@@ -451,7 +473,6 @@ test("an incomplete check-run listing cannot prove a required context", async ()
   });
   try {
     const draft = await truncated.publisher.publishDraft(truncated.request);
-    await truncated.publisher.mergeVerified(truncated.request, draft);
     await assert.rejects(
       truncated.publisher.mergeVerified(truncated.request, draft),
       /unverifiable/,
@@ -462,11 +483,8 @@ test("an incomplete check-run listing cannot prove a required context", async ()
   }
 });
 
-test("a pass observed before the draft became ready cannot authorize the merge", async () => {
-  // GitHub does not guarantee that a ready_for_review workflow has registered when the ready
-  // request returns, so the first reading after ready can still be the older pass. The merge is
-  // therefore never taken in the invocation that performed the transition.
-  const fixture = publisherFixture("agent-runner-github-ready-window-", {
+test("a pending exact-head check cannot authorize merge but a later pass can", async () => {
+  const fixture = publisherFixture("agent-runner-github-pending-then-pass-", {
     checkRunSequence: [
       [checkRun({ status: "queued", conclusion: null })],
       [checkRun()],
@@ -474,11 +492,6 @@ test("a pass observed before the draft became ready cannot authorize the merge",
   });
   try {
     const draft = await fixture.publisher.publishDraft(fixture.request);
-
-    const readied = await fixture.publisher.mergeVerified(fixture.request, draft);
-    assert.equal(readied.outcome, "waiting");
-    assert.match(fixture.log(), /^gh ready$/m);
-    assert.doesNotMatch(fixture.log(), /^gh merge/m);
 
     await assert.rejects(
       fixture.publisher.mergeVerified(fixture.request, draft),
@@ -489,31 +502,30 @@ test("a pass observed before the draft became ready cannot authorize the merge",
     const merged = await fixture.publisher.mergeVerified(fixture.request, draft);
     assert.equal(merged.outcome, "merged");
     assert.match(fixture.log(), /^gh merge /m);
-    assert.equal((fixture.log().match(/^gh ready$/gm) ?? []).length, 1);
+    assert.doesNotMatch(fixture.log(), /^gh ready$/m);
   } finally {
     fixture.cleanup();
   }
 });
 
-test("a required check that does not rerun on ready still reaches the merge", async () => {
-  const fixture = publisherFixture("agent-runner-github-no-rerun-", {});
+test("an already passing pull-request check reaches the merge without a settle timer", async () => {
+  const fixture = publisherFixture("agent-runner-github-no-settle-timer-", {});
   try {
     const draft = await fixture.publisher.publishDraft(fixture.request);
 
-    const readied = await fixture.publisher.mergeVerified(fixture.request, draft);
     const merged = await fixture.publisher.mergeVerified(fixture.request, draft);
 
-    assert.equal(readied.outcome, "waiting");
     assert.equal(merged.outcome, "merged");
     if (merged.outcome !== "merged") throw new Error("unreachable");
     assert.equal(merged.taskCompleted, true);
     assert.match(fixture.log(), /^gh merge /m);
+    assert.doesNotMatch(fixture.log(), /^gh ready$/m);
   } finally {
     fixture.cleanup();
   }
 });
 
-function fixtureRequest(directory: string): DraftPullRequestRequest {
+function fixtureRequest(directory: string, draft = true): DraftPullRequestRequest {
   return {
     repository: "example/repo",
     repositoryPath: directory,
@@ -527,6 +539,7 @@ function fixtureRequest(directory: string): DraftPullRequestRequest {
     headSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
     title: "Implement fixture",
     body: "Fixture body",
+    draft,
   };
 }
 
@@ -548,6 +561,8 @@ interface FakeGhOptions {
   checkRunsBeforeReady?: FakeCheckRun[];
   checkRunSequence?: FakeCheckRun[][];
   checkRunTotal?: number;
+  workflowSource?: string;
+  requiredApprovingReviewCount?: number;
 }
 
 const NODE_TESTS_APP = 15368;
@@ -580,6 +595,8 @@ function fakeGhScript(
     checkRunsBeforeReady: options.checkRunsBeforeReady ?? null,
     checkRunSequence: options.checkRunSequence ?? null,
     checkRunTotal: options.checkRunTotal ?? null,
+    workflowSource: options.workflowSource ?? null,
+    requiredApprovingReviewCount: options.requiredApprovingReviewCount ?? 0,
   };
   return `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -599,7 +616,7 @@ if (args[0] === "pr" && args[1] === "list") {
   fs.writeFileSync(statePath, JSON.stringify([{
     number: 7,
     url: "https://github.com/example/repo/pull/7",
-    isDraft: true,
+    isDraft: args.includes("--draft"),
     state: "open",
     mergedAt: null,
     headRefName: head,
@@ -656,10 +673,29 @@ if (args[0] === "pr" && args[1] === "list") {
         ))
       }
     };
+    protection.required_pull_request_reviews = settings.requiredApprovingReviewCount === 0
+      ? null
+      : { required_approving_review_count: settings.requiredApprovingReviewCount };
     if (settings.enforceAdmins !== null) {
       protection.enforce_admins = { enabled: settings.enforceAdmins };
     }
     process.stdout.write(JSON.stringify(protection));
+  } else if (endpoint && endpoint.includes("/.github/workflows?ref=")) {
+    append("gh workflow directory");
+    process.stdout.write(JSON.stringify([{
+      path: ".github/workflows/project-verification.yml",
+      type: "file"
+    }]));
+  } else if (endpoint && endpoint.includes("/.github/workflows/")) {
+    append("gh workflow source");
+    const jobs = settings.requiredChecks.map((entry, index) =>
+      "  check_" + index + ":\\n" +
+      "    name: " + JSON.stringify(entry.context) + "\\n" +
+      "    runs-on: ubuntu-latest\\n" +
+      "    steps:\\n" +
+      "      - run: npm test\\n"
+    ).join("");
+    process.stdout.write(settings.workflowSource ?? "on: pull_request\\njobs:\\n" + jobs);
   } else if (endpoint && endpoint.includes("/issues/")) {
     const issue = fs.existsSync(issueStatePath)
       ? JSON.parse(fs.readFileSync(issueStatePath, "utf8"))
@@ -719,7 +755,7 @@ function publisherFixture(prefix: string, options: FakeGhOptions = {}): Publishe
   chmodSync(git, 0o755);
   return {
     publisher: new GitHubPullRequestPublisher({ ghExecutable: gh, gitExecutable: git }),
-    request: fixtureRequest(directory),
+    request: fixtureRequest(directory, false),
     log: () => (existsSync(calls) ? readFileSync(calls, "utf8") : ""),
     cleanup: () => rmSync(directory, { recursive: true, force: true }),
   };

@@ -15,6 +15,7 @@ export type AutopilotStopReason =
   | "worker-unavailable"
   | "quota-unavailable"
   | "run-failure"
+  | "failure-budget"
   | "ci-wait-timeout"
   | "no-enabled-projects";
 
@@ -27,6 +28,8 @@ export interface AutopilotRequest {
   maxNoProgressPasses: number;
   pollIntervalMs: number;
   globalConcurrency: number;
+  /** Distinct task revisions quarantined before the whole execution stops. Defaults to three. */
+  maxTaskFailures?: number;
 }
 
 export interface AutopilotPass {
@@ -54,6 +57,8 @@ export interface MorningReportRun {
 }
 
 export interface AutopilotResult {
+  executionId: string;
+  resumedAfterInterruption: boolean;
   startedAt: number;
   finishedAt: number;
   stopReason: AutopilotStopReason;
@@ -81,6 +86,13 @@ export interface AutopilotResult {
       runId: string;
       pullRequestUrl: string | null;
       detail: string | null;
+    }>;
+    quarantined: Array<{
+      projectId: string;
+      taskId: string;
+      revision: string;
+      runId: string;
+      reason: string;
     }>;
   };
 }
@@ -117,7 +129,11 @@ export class AutopilotController {
     if (!request.enabled) {
       throw new Error("Autopilot requires the explicit enable flag");
     }
-    const startedAt = this.#now();
+    const invocationStartedAt = this.#now();
+    const executionState = this.#runs.startOrResumeAutopilot(invocationStartedAt);
+    const executionId = executionState.execution.id;
+    const startedAt = executionState.execution.startedAt;
+    const maxTaskFailures = request.maxTaskFailures ?? 3;
     const enabledProjects = this.#projects.list().filter((project) => project.enabled);
     const passes: AutopilotPass[] = [];
     const latest = new Map<string, RunOnceResult>();
@@ -125,7 +141,9 @@ export class AutopilotController {
     let noProgressPasses = 0;
     let stopReason: AutopilotStopReason | null = enabledProjects.length === 0
       ? "no-enabled-projects"
-      : null;
+      : this.#runs.autopilotQuarantines(executionId).length >= maxTaskFailures
+        ? "failure-budget"
+        : null;
 
     while (stopReason === null) {
       if (this.#now() >= request.deadlineAt) {
@@ -136,6 +154,7 @@ export class AutopilotController {
       const projectResults: RunOnceResult[] = [];
       let passClaims = 0;
       let progress = false;
+      let materialProgress = false;
       for (const project of enabledProjects) {
         const remainingClaims = Math.max(0, request.maxNewClaims - totalNewClaims);
         const runRequest: RunOnceRequest = {
@@ -146,16 +165,29 @@ export class AutopilotController {
           dryRun: false,
           targetTaskId: null,
         };
-        const result = await this.#runner.run(runRequest);
+        let result: RunOnceResult;
+        try {
+          result = await this.#runner.run(runRequest);
+        } catch (error) {
+          stopReason = stopForThrownError(error);
+          break;
+        }
         latest.set(project.id, result);
         projectResults.push(result);
         passClaims += result.claimed.length;
         totalNewClaims += result.claimed.length;
-        progress ||= madeProgress(result);
+        const changed = madeMaterialProgress(result);
+        materialProgress ||= changed;
+        progress ||= changed || waitingOnRequiredCi(result);
+        recordQuarantines(result, this.#runs, executionId, this.#now());
 
-        const stop = stopFor(result, this.#runs);
+        const stop = globalStopFor(result, this.#runs);
         if (stop) {
           stopReason = stop;
+          break;
+        }
+        if (this.#runs.autopilotQuarantines(executionId).length >= maxTaskFailures) {
+          stopReason = "failure-budget";
           break;
         }
       }
@@ -199,21 +231,29 @@ export class AutopilotController {
         stopReason = "deadline";
         break;
       }
-      await this.#sleep(Math.min(request.pollIntervalMs, remainingMs));
+      if (!materialProgress) {
+        await this.#sleep(Math.min(request.pollIntervalMs, remainingMs));
+      }
     }
 
-    return {
+    const finishedAt = this.#now();
+    const finalStopReason = stopReason ?? "deadline";
+    const result: AutopilotResult = {
+      executionId,
+      resumedAfterInterruption: executionState.resumed,
       startedAt,
-      finishedAt: this.#now(),
-      stopReason: stopReason ?? "deadline",
+      finishedAt,
+      stopReason: finalStopReason,
       passes,
       totalNewClaims,
       noProgressPasses,
-      report: this.#report(latest),
+      report: this.#report(latest, executionId),
     };
+    this.#runs.finishAutopilot(executionId, finishedAt, finalStopReason);
+    return result;
   }
 
-  #report(latest: Map<string, RunOnceResult>): AutopilotResult["report"] {
+  #report(latest: Map<string, RunOnceResult>, executionId: string): AutopilotResult["report"] {
     const rows: MorningReportRun[] = [];
     for (const project of this.#projects.list().filter((entry) => entry.enabled)) {
       for (const run of this.#runs.listProject(project.id)) {
@@ -253,7 +293,7 @@ export class AutopilotController {
         waiting: result.waiting,
         blocked: result.blocked,
       })),
-      ciWaitTimeouts: [...latest.entries()].flatMap(([projectId, result]) =>
+      ciWaitTimeouts: uniqueCiWaitTimeouts([...latest.entries()].flatMap(([projectId, result]) =>
         [...result.claimed, ...result.reconciled]
           .filter((item) => item.ciWaitExpired)
           .map((item) => ({
@@ -263,19 +303,24 @@ export class AutopilotController {
             pullRequestUrl: item.pullRequestUrl,
             detail: item.ciWaitDetail,
           }))
-      ),
+      )),
+      quarantined: this.#runs.autopilotQuarantines(executionId).map((entry) => ({
+        projectId: entry.projectId,
+        taskId: entry.taskId,
+        revision: entry.revision,
+        runId: entry.runId,
+        reason: entry.reason,
+      })),
     };
   }
 }
 
-function madeProgress(result: RunOnceResult): boolean {
+function madeMaterialProgress(result: RunOnceResult): boolean {
   return result.claimed.length > 0 ||
     result.reconciliation.some((item) =>
       item.initialState !== item.state ||
       item.base === "advanced" ||
-      item.execution !== "not-run" ||
-      ["completed", "failed", "waiting-human"].includes(item.outcome)) ||
-    waitingOnRequiredCi(result);
+      item.execution !== "not-run");
 }
 
 function waitingOnRequiredCi(result: RunOnceResult): boolean {
@@ -285,16 +330,7 @@ function waitingOnRequiredCi(result: RunOnceResult): boolean {
       item.outcome === "waiting-ci" && !item.ciWaitExpired);
 }
 
-function ciWaitExpired(result: RunOnceResult): boolean {
-  return [...result.claimed, ...result.reconciled].some((item) => item.ciWaitExpired) ||
-    result.reconciliation.some((item) => item.ciWaitExpired);
-}
-
-function stopFor(result: RunOnceResult, runs: RunStore): AutopilotStopReason | null {
-  if (
-    result.claimed.some((item) => item.state === "waiting-human") ||
-    result.reconciliation.some((item) => item.outcome === "waiting-human")
-  ) return "human-gate";
+function globalStopFor(result: RunOnceResult, runs: RunStore): AutopilotStopReason | null {
   if (!result.ok) {
     const tasks = [...result.claimed, ...result.reconciled];
     const failed = tasks.find((item) => item.failureReason);
@@ -302,14 +338,35 @@ function stopFor(result: RunOnceResult, runs: RunStore): AutopilotStopReason | n
     if (failed) {
       const summary = runs.execution(failed.runId)?.workerSummary ?? "";
       if (/quota|rate limit|usage limit|capacity/i.test(summary)) return "quota-unavailable";
-      return "run-failure";
     }
-    const retryable = tasks.some((item) => item.delivery === "retryable-failure") ||
-      result.reconciliation.some((item) => item.outcome === "retryable-failure");
-    if (!retryable) return "run-failure";
   }
-  if (ciWaitExpired(result)) return "ci-wait-timeout";
   return null;
+}
+
+function recordQuarantines(
+  result: RunOnceResult,
+  runs: RunStore,
+  executionId: string,
+  now: number,
+): void {
+  const items = [...result.claimed, ...result.reconciled];
+  for (const item of items) {
+    const reason = item.ciWaitExpired
+      ? "ci-wait-timeout"
+      : item.state === "failed" || item.delivery === "failed" || item.execution === "failed"
+        ? item.failureReason ?? "task-run-failed"
+        : null;
+    if (reason && runs.get(item.runId)) {
+      runs.recordAutopilotQuarantine(executionId, item.runId, reason, now);
+    }
+  }
+}
+
+function stopForThrownError(error: unknown): AutopilotStopReason {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/worker profile|worker-profile-unavailable/i.test(message)) return "worker-unavailable";
+  if (/quota|rate limit|usage limit|capacity/i.test(message)) return "quota-unavailable";
+  return "run-failure";
 }
 
 function validateRequest(request: AutopilotRequest): void {
@@ -334,8 +391,24 @@ function validateRequest(request: AutopilotRequest): void {
   ) {
     throw new Error("globalConcurrency must be an integer from 1 to 16");
   }
+  if (
+    request.maxTaskFailures !== undefined &&
+    (!Number.isInteger(request.maxTaskFailures) || request.maxTaskFailures < 1)
+  ) {
+    throw new Error("maxTaskFailures must be a positive integer");
+  }
 }
 
 function roundUsage(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function uniqueCiWaitTimeouts(
+  entries: AutopilotResult["report"]["ciWaitTimeouts"],
+): AutopilotResult["report"]["ciWaitTimeouts"] {
+  const byRun = new Map<string, (typeof entries)[number]>();
+  for (const entry of entries) {
+    if (!byRun.has(entry.runId)) byRun.set(entry.runId, entry);
+  }
+  return [...byRun.values()];
 }

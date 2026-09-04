@@ -15,19 +15,7 @@ import type {
   RequiredCheck,
 } from "./types.js";
 
-export const DEFAULT_MAX_CI_WAIT_MINUTES = 30;
-
-/**
- * Post-ready observations discarded before an automatic merge is allowed.
- *
- * Marking a draft ready can trigger a `ready_for_review` workflow, and GitHub does not guarantee
- * that such a run has registered when the ready request returns or when the next reading is taken.
- * Head-exact matching already closes the equivalent window for a new commit, because a commit with
- * no registered run carries no passing result to mistake. Only the ready transition can leave a
- * genuine same-head pass in place while a new run is still being created, so the merge waits for a
- * later pass rather than trusting the first reading after that transition.
- */
-export const READY_SETTLE_OBSERVATIONS = 1;
+export const DEFAULT_MAX_CI_WAIT_MINUTES = 60;
 
 export interface DeliverTaskRequest {
   runId: string;
@@ -222,11 +210,21 @@ export class DeliveryCoordinator {
           )
         : this.#terminalFailure(initial, "base-advanced-before-delivery", at(), detail);
     }
+    if (
+      request.contract.delivery.merge === "after-required-checks" &&
+      pullRequest.state !== "merged" &&
+      pullRequest.draft
+    ) {
+      return this.#terminalFailure(initial, "automatic-pull-request-is-draft", at(), {
+        pullRequest: pullRequest.externalId,
+        recovery: "Close the inconsistent draft and start a new approved task revision",
+      });
+    }
     try {
       validatePullRequest(
         publishRequest,
         pullRequest,
-        existingDelivery !== null && request.contract.delivery.merge === "after-required-checks",
+        request.contract.delivery.merge === "after-required-checks",
       );
     } catch (error) {
       return this.#terminalFailure(initial, "invalid-draft-pull-request", at(), error);
@@ -373,27 +371,6 @@ export class DeliveryCoordinator {
       if (automaticMerge) {
         if (!this.#publisher.mergeVerified) {
           return this.#terminalFailure(run, "automatic-merge-unsupported", at());
-        }
-        const events = this.#runs.events(run.id);
-        const readiedAt = events.find((event) =>
-          event.type === "automatic-merge-deferred"
-        )?.at;
-        if (readiedAt !== undefined) {
-          // The reading taken in this pass has already been recorded, so a count of one means this
-          // is the first observation after the ready transition.
-          const sinceReady = events.filter((event) =>
-            event.type === "ci-observed" && event.at > readiedAt
-          ).length;
-          if (sinceReady <= READY_SETTLE_OBSERVATIONS) {
-            const reason = "The first required-check reading after the pull request became ready " +
-              "is not accepted, because a ready_for_review workflow may not have registered yet";
-            this.#runs.recordEvidence(run.id, "automatic-merge-settling", {
-              reason,
-              observationsSinceReady: sinceReady,
-              settleObservations: READY_SETTLE_OBSERVATIONS,
-            }, at());
-            return waitingResult(reason, waitingContexts);
-          }
         }
         let merged;
         try {
@@ -549,6 +526,7 @@ function draftRequest(
         ? "Automatic merge: enabled after required checks"
         : "Automatic merge: disabled",
     ].join("\n"),
+    draft: request.contract.delivery.merge === "never",
   };
 }
 
@@ -561,7 +539,7 @@ function validatePullRequest(
     pullRequest.externalId.trim() === "" ||
     pullRequest.url.trim() === "" ||
     (pullRequest.state !== "open" && !(allowReadyOrMerged && pullRequest.state === "merged")) ||
-    (!pullRequest.draft && !allowReadyOrMerged) ||
+    (pullRequest.draft !== request.draft && !allowReadyOrMerged) ||
     pullRequest.branchName !== request.branchName ||
     pullRequest.baseBranch !== request.baseBranch ||
     pullRequest.headSha !== request.headSha
@@ -583,6 +561,9 @@ function validateExistingPullRequest(
   }
   if (!observed.draft && mergePolicy === "never") {
     return "pull-request-not-draft";
+  }
+  if (observed.draft && mergePolicy === "after-required-checks") {
+    return "automatic-pull-request-is-draft";
   }
   if (
     observed.externalId !== persisted.externalId ||

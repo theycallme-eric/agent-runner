@@ -27,7 +27,9 @@ A bounded scheduler and morning report are available behind an explicit `autopil
 Nothing runs in the background unless that command is deliberately launched. Projects may retain
 review-only drafts with `merge: never`, or explicitly choose protected autonomous delivery with
 `merge: after-required-checks`. Autonomous delivery refuses to start unless the base branch has
-strict protection and at least one required check. It merges only the exact independently verified
+strict administrator-bound protection, no required human reviews, and a statically provable
+single-producer GitHub Actions job for every app-pinned required check. Automatic pull requests are
+ready from creation; review-only work remains draft. It merges only the exact independently verified
 head, closes the source task, refreshes the graph, and allows newly unblocked work to proceed.
 A five-node disposable GitHub proof has now exercised that complete path through parallel roots,
 parallel middle work, final dependency unlocking, and a `completed` report without per-node human
@@ -70,9 +72,10 @@ npm run verify
 The suite currently proves that duplicate claims are rejected, expired attempts are bounded, live
 leases cannot be stolen, controller restarts preserve state, false worker success is rejected,
 advanced bases are merged and fully reverified, conflicts are restored and reported, protected paths
-wait for a human, review-only changed/closed/merged drafts fail closed, pending CI is polled without republishing,
-automatic merge requires strict protected checks and an exact head, source issues close only after a
-proved merge, and workers remain replaceable.
+wait for a human, review-only changed/closed/merged drafts fail closed, pending CI is polled without
+republishing, automatic merge requires a provable protected CI topology and an exact head, source
+issues close only after a proved merge, crashes resume durable execution/quarantine state, missing
+approved prerequisites block only affected tasks, and workers remain replaceable.
 
 ## Current CLI
 
@@ -89,7 +92,8 @@ node dist/src/cli.js status
 node dist/src/cli.js ready <project-id>
 node dist/src/cli.js profiles --profiles /path/to/workers.yml
 node dist/src/cli.js run-once <project-id> --dry-run --profiles /path/to/workers.yml
-node dist/src/cli.js autopilot --enable --minutes 480 --max-new-claims 3 --concurrency 2
+node dist/src/cli.js autopilot --enable --minutes 480 --max-new-claims 20 --concurrency 2 \
+  --max-ci-wait-minutes 60 --max-task-failures 3
 ```
 
 `register` requires the product repository and external contract as separate explicit paths. It
@@ -115,7 +119,8 @@ native dependency set. It preserves Requirements Builder task IDs rather than re
 issue numbers. An inactive approval, unknown version, edited issue, changed label/dependency, or
 altered handoff fails the entire read before a claim can be created. Task-specific approved
 verification commands run independently after the worker, followed by every project-level required
-verification command.
+verification command. Approved runtime prerequisites are checked without exposing secret values;
+only tasks linked to a missing prerequisite are blocked, while unrelated branches may continue.
 
 `profiles` validates controller-owned worker configuration and prints only non-secret metadata. It
 does not require credentials merely to list profiles. Execution resolves credentials only for the
@@ -134,7 +139,10 @@ run contract](docs/run-once.md).
 `autopilot` repeats that same reconciler-first path across enabled registered projects. It requires
 `--enable`, defaults to global concurrency one, and accepts an explicit ceiling up to 16. Project
 contracts may set a lower capacity, and only dependency-independent ready tasks are claimed
-together. It stops at explicit time, claim, no-progress, human, worker/quota, or failure boundaries.
+together. Task-local failures and CI timeouts are quarantined so unrelated work can continue; three
+distinct quarantined task revisions stop new work by default, and that cumulative count survives a
+controller crash within the same owner-authorized execution. Global approval, repository,
+preflight, worker, or quota failures still stop immediately.
 See [the autopilot contract](docs/autopilot.md).
 
 ## Coding-agent support
@@ -185,5 +193,6 @@ configuration files.
 
 - Public repository: [theycallme-eric/agent-runner](https://github.com/theycallme-eric/agent-runner)
 - License and public packaging are deferred; neither is required for the local workflow.
-- Next implementation gate: use the proven flow on an owner-selected real project, or first add only
-  the operating convenience needed to make that project setup clear and repeatable.
+- WP-09 is implemented locally and covered by deterministic tests. A separately authorized
+  adversarial disposable GitHub proof remains the final live release check before selecting a real
+  product; no live repository was changed by the local implementation.

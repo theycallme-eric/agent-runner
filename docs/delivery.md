@@ -7,7 +7,7 @@ for verification, and no unresolved protected-path gate.
 `PullRequestPublisher` is the provider-neutral boundary. An adapter must:
 
 - push the verified branch without merging it;
-- create or find exactly one open draft pull request for that branch;
+- create or find exactly one open pull request for that branch, with draft state selected by policy;
 - observe a persisted pull request without pushing or editing it;
 - update an existing draft only when a newly verified synchronized head must be published;
 - return the actual branch, base branch, and head commit for validation; and
@@ -28,16 +28,19 @@ recover the controlled merge. Failed CI can never complete a run.
 ## GitHub adapter
 
 `GitHubPullRequestPublisher` verifies the local head, pushes the controller-owned branch, and uses
-the authenticated `gh` CLI to create a draft pull request. Persisted pull requests are inspected by
-number through the GitHub API. Under `merge: never`, human changes such as marking a draft ready,
+the authenticated `gh` CLI to create a draft under `merge: never` or a ready pull request under
+`merge: after-required-checks`. Persisted pull requests are inspected by number through the GitHub
+API. Under `merge: never`, human changes such as marking a draft ready,
 closing it, merging it, or moving its head are reported rather than silently undone. Required check
 buckets are normalized through `gh pr checks`; no required checks remains a visible `none` state
 rather than being treated as success.
 
-Under `merge: after-required-checks`, the adapter requires strict branch protection and at least one
-required check before any claim or worker launch. After independent verification and passing CI, it
-rechecks protection, marks the exact draft ready, squash-merges with an exact-head guard, and closes
-the source issue as completed. It does not delete branches. See [Protected automatic merge](automatic-merge.md).
+Under `merge: after-required-checks`, the adapter requires the narrow, statically provable GitHub
+Actions topology, strict administrator-bound branch protection, app-pinned required checks, and no
+required approving reviews before any claim or worker launch. After independent verification and
+passing CI, it rechecks that policy and every exact-head check, squash-merges with an exact-head
+guard, and closes the source issue as completed. It never changes a pull request from draft to ready
+and does not delete branches. See [Protected automatic merge](automatic-merge.md).
 
 ## Current boundary
 

@@ -17,10 +17,11 @@ export interface ApprovedHandoffTask {
   acceptanceCriteria: string[];
   verificationExpectations: string[];
   dependencies: string[];
+  prerequisiteIds: string[];
 }
 
 export interface ApprovedHandoff {
-  version: 1;
+  version: 2;
   createdAt: string;
   repository: string;
   baseBranch: string;
@@ -33,6 +34,19 @@ export interface ApprovedHandoff {
   graphSha256: string;
   approvalPointerPath: string;
   approvalRecordPath: string;
+  repositoryReadiness: {
+    runtime: string;
+    dependencyInstallCommand: string | null;
+    verificationCommands: string[];
+  };
+  executionPrerequisites: Array<{
+    id: string;
+    kind: "account" | "credential" | "service" | "permission" | "environment";
+    description: string;
+    sourceRefs: string[];
+    verificationCommand: string;
+    affectedTaskIds: string[];
+  }>;
   tasks: ApprovedHandoffTask[];
   handoffSha256: string;
 }
@@ -95,6 +109,7 @@ export async function loadApprovedHandoff(
       `Approved handoff base branch ${handoff.baseBranch} does not match ${contract.project.baseBranch}`,
     );
   }
+  assertReadinessMatchesContract(handoff, contract);
 
   const pointerPath = await realpath(handoff.approvalPointerPath);
   const recordPath = await realpath(handoff.approvalRecordPath);
@@ -121,15 +136,72 @@ export function parseApprovedHandoff(source: string): ApprovedHandoff {
     "version", "createdAt", "repository", "baseBranch", "requirementsSetId",
     "requirementsRevision", "requirementsRevisionSha256", "approval", "approvalSha256",
     "approvedBy", "graphSha256", "approvalPointerPath", "approvalRecordPath", "tasks",
+    "repositoryReadiness", "executionPrerequisites",
     "handoffSha256",
   ], "handoff");
-  literal(value.version, 1, "handoff.version");
+  literal(value.version, 2, "handoff.version");
+  const readiness = objectAt(value.repositoryReadiness, "handoff.repositoryReadiness");
+  exactKeys(
+    readiness,
+    ["runtime", "dependencyInstallCommand", "verificationCommands"],
+    "handoff.repositoryReadiness",
+  );
+  const repositoryReadiness = {
+    runtime: stringAt(readiness.runtime, "handoff.repositoryReadiness.runtime"),
+    dependencyInstallCommand: nullableStringAt(
+      readiness.dependencyInstallCommand,
+      "handoff.repositoryReadiness.dependencyInstallCommand",
+    ),
+    verificationCommands: uniqueStrings(
+      readiness.verificationCommands,
+      "handoff.repositoryReadiness.verificationCommands",
+      false,
+    ),
+  };
+  const executionPrerequisites = arrayAt(
+    value.executionPrerequisites,
+    "handoff.executionPrerequisites",
+  ).map((entry, index) => {
+    const prerequisite = objectAt(entry, `handoff.executionPrerequisites[${index}]`);
+    exactKeys(
+      prerequisite,
+      ["id", "kind", "description", "sourceRefs", "verificationCommand", "affectedTaskIds"],
+      `handoff.executionPrerequisites[${index}]`,
+    );
+    return {
+      id: stringAt(prerequisite.id, `handoff.executionPrerequisites[${index}].id`),
+      kind: enumAt(
+        prerequisite.kind,
+        ["account", "credential", "service", "permission", "environment"] as const,
+        `handoff.executionPrerequisites[${index}].kind`,
+      ),
+      description: stringAt(
+        prerequisite.description,
+        `handoff.executionPrerequisites[${index}].description`,
+      ),
+      sourceRefs: uniqueStrings(
+        prerequisite.sourceRefs,
+        `handoff.executionPrerequisites[${index}].sourceRefs`,
+        false,
+      ),
+      verificationCommand: stringAt(
+        prerequisite.verificationCommand,
+        `handoff.executionPrerequisites[${index}].verificationCommand`,
+      ),
+      affectedTaskIds: uniqueStrings(
+        prerequisite.affectedTaskIds,
+        `handoff.executionPrerequisites[${index}].affectedTaskIds`,
+        false,
+      ),
+    };
+  });
   const tasks = nonEmptyArrayAt(value.tasks, "handoff.tasks").map((entry, index) => {
     const task = objectAt(entry, `handoff.tasks[${index}]`);
     exactKeys(task, [
       "taskId", "issueNumber", "databaseId", "title", "prompt", "labels",
       "requirementIds", "sourceRefs", "acceptanceCriteria", "verificationExpectations",
       "dependencies",
+      "prerequisiteIds",
     ], `handoff.tasks[${index}]`);
     return {
       taskId: stringAt(task.taskId, `handoff.tasks[${index}].taskId`),
@@ -147,21 +219,40 @@ export function parseApprovedHandoff(source: string): ApprovedHandoff {
         false,
       ),
       dependencies: uniqueStrings(task.dependencies, `handoff.tasks[${index}].dependencies`, true),
+      prerequisiteIds: uniqueStrings(
+        task.prerequisiteIds,
+        `handoff.tasks[${index}].prerequisiteIds`,
+        true,
+      ),
     };
   });
   assertUnique(tasks.map(({ taskId }) => taskId), "handoff task ids");
   assertUnique(tasks.map(({ issueNumber }) => String(issueNumber)), "handoff issue numbers");
   assertUnique(tasks.map(({ databaseId }) => String(databaseId)), "handoff database ids");
   const taskIds = new Set(tasks.map(({ taskId }) => taskId));
+  const prerequisites = new Map(executionPrerequisites.map((entry) => [entry.id, entry]));
+  assertUnique([...prerequisites.keys()], "handoff prerequisite ids");
   for (const task of tasks) {
     const missing = task.dependencies.filter((dependency) => !taskIds.has(dependency));
     if (missing.length > 0) {
       throw new Error(`Approved task ${task.taskId} has missing dependencies: ${missing.join(", ")}`);
     }
     requireWorkflowLabels(task);
+    const unknownPrerequisites = task.prerequisiteIds.filter((id) => !prerequisites.has(id));
+    if (unknownPrerequisites.length > 0) {
+      throw new Error(`Approved task ${task.taskId} has missing prerequisites: ${unknownPrerequisites.join(", ")}`);
+    }
+  }
+  for (const prerequisite of executionPrerequisites) {
+    const declared = [...prerequisite.affectedTaskIds].sort();
+    const referenced = tasks.filter((task) => task.prerequisiteIds.includes(prerequisite.id))
+      .map((task) => task.taskId).sort();
+    if (!sameStrings(declared, referenced, false)) {
+      throw new Error(`Approved prerequisite ${prerequisite.id} task linkage is inconsistent`);
+    }
   }
   const handoff: ApprovedHandoff = {
-    version: 1,
+    version: 2,
     createdAt: stringAt(value.createdAt, "handoff.createdAt"),
     repository: stringAt(value.repository, "handoff.repository"),
     baseBranch: stringAt(value.baseBranch, "handoff.baseBranch"),
@@ -174,6 +265,8 @@ export function parseApprovedHandoff(source: string): ApprovedHandoff {
     graphSha256: hexAt(value.graphSha256, "handoff.graphSha256"),
     approvalPointerPath: absolutePathAt(value.approvalPointerPath, "handoff.approvalPointerPath"),
     approvalRecordPath: absolutePathAt(value.approvalRecordPath, "handoff.approvalRecordPath"),
+    repositoryReadiness,
+    executionPrerequisites,
     tasks,
     handoffSha256: hexAt(value.handoffSha256, "handoff.handoffSha256"),
   };
@@ -226,6 +319,27 @@ function validateRecordMatchesHandoff(record: ApprovalRecord, handoff: ApprovedH
     ) {
       throw new Error(`Approved handoff task ${task.taskId} does not match its approval record`);
     }
+  }
+}
+
+function assertReadinessMatchesContract(
+  handoff: ApprovedHandoff,
+  contract: ProjectContract,
+): void {
+  if (!sameStrings(
+    handoff.repositoryReadiness.verificationCommands,
+    contract.verification.required,
+    false,
+  )) {
+    throw new Error(
+      "Approved repository verification commands do not match the external Runner contract",
+    );
+  }
+  const install = handoff.repositoryReadiness.dependencyInstallCommand;
+  if (install !== null && !contract.workspace.setup.includes(install)) {
+    throw new Error(
+      `Approved dependency-install command is absent from the external Runner contract: ${install}`,
+    );
   }
 }
 
@@ -298,11 +412,27 @@ function nonEmptyArrayAt(value: unknown, path: string): unknown[] {
   return value;
 }
 
+function arrayAt(value: unknown, path: string): unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
+  return value;
+}
+
 function stringAt(value: unknown, path: string): string {
   if (typeof value !== "string" || value.trim() === "" || value.includes("\0")) {
     throw new Error(`${path} must be a non-empty string without NUL bytes`);
   }
   return value;
+}
+
+function nullableStringAt(value: unknown, path: string): string | null {
+  return value === null ? null : stringAt(value, path);
+}
+
+function enumAt<const T extends readonly string[]>(value: unknown, allowed: T, path: string): T[number] {
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    throw new Error(`${path} must be one of: ${allowed.join(", ")}`);
+  }
+  return value as T[number];
 }
 
 function absolutePathAt(value: unknown, path: string): string {
@@ -376,4 +506,3 @@ function sha256(value: string): string {
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-

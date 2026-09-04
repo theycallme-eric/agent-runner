@@ -120,19 +120,25 @@ Only after this spike should any real product be registered with the Runner.
 
 The local simulator now covers the controller-owned portions of exit criteria 1, 3, 4, 5, and 6.
 The concrete execution service joins an atomic claim, exact-base worktree, controller-selected
-`WorkerAdapter`, independent setup and verification commands, protected-path gate, local commit, and
-durable workspace/session/head evidence. It rejects worker crashes, timeouts, false success without
-changes, verification failure, and a base that advances before the verified head is recorded. GitHub
+`WorkerAdapter`, approved task-scoped runtime prerequisite checks, independent setup and verification
+commands, protected-path gate, local commit, and durable workspace/session/head evidence. A missing
+runtime prerequisite blocks only its linked tasks. It rejects worker crashes, timeouts, false success
+without changes, verification failure, and a base that advances before the verified head is recorded. GitHub
 issue and native-dependency discovery works through the same plug-in boundary. A provider-neutral
-delivery coordinator now reconciles one draft pull request per verified branch, persists its identity
-and CI state, and rejects failed CI. Review-only projects reject non-draft publication. Protected
-automatic projects preflight strict required checks before claims, merge only the exact verified
+delivery coordinator now reconciles one policy-owned pull request per verified branch, persists its
+identity and CI state, and rejects failed CI. Review-only projects require drafts. Protected automatic
+projects require ready pull requests and positively preflight one static GitHub Actions producer per
+app-pinned required context, strict administrator-bound protection, and zero required human reviews
+before claims. They reconcile all exact-identity check rows fail-closed, merge only the exact verified
 head after CI passes, and complete the source issue only after GitHub proves the merge. Restart
 reconciliation can recover that sequence without rebuilding a node. The live dogfood path includes
 a successful isolated Fable session and persisted draft pull request. A disposable five-node proof
 also completed the protected automatic path through parallel branches, base advancement,
 reverification, issue completion, dependency unlocking, and a final completed report. The bounded
-multi-project scheduler reuses this joined path with explicit limits and a consolidated report.
+multi-project scheduler reuses this joined path with explicit limits, persistent owner-execution
+identity, cumulative task-revision quarantines, adaptive polling, and a consolidated report.
+Task-local failures and CI timeouts do not prevent unrelated branches from progressing; global
+approval, repository, worker, quota, and safety-preflight failures still stop immediately.
 
 `run-once` is the first joined public surface. It refreshes `origin/<base>` before claiming and uses
 read-only `ls-remote` checks during execution/delivery, avoiding the stale-local-branch assumption.
@@ -161,5 +167,7 @@ Requirements Builder integrations add an external `approvedHandoff` path to that
 configuration. Agent Runner parses and hashes the contract independently, verifies its active
 immutable approval record, then compares every live issue and native dependency before planning.
 This preserves upstream task IDs and makes a label alone insufficient authorization. Approved
-task-specific verification commands run outside the implementing worker in addition to the full
-project verification suite; both layers rerun after base synchronization.
+repository readiness must exactly match the Runner contract. Named, non-secret execution
+prerequisites remain task-scoped, and their approved verification commands run before claims.
+Approved task-specific verification commands run outside the implementing worker in addition to the
+full project verification suite; both layers rerun after base synchronization.

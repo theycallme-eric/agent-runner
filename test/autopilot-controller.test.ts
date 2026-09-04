@@ -134,15 +134,16 @@ test("reports a fully drained DAG as completed", async () => {
   }
 });
 
-test("stops immediately at a human gate", async () => {
+test("quarantines a human-gated branch and continues until the bounded no-progress stop", async () => {
   const projects = projectsFixture();
   const runs = new RunStore();
   let calls = 0;
+  let first = true;
   const controller = new AutopilotController(projects, runs, {
     run: async (request) => {
       calls += 1;
       const result = resultFixture(request.projectId, "worker-a", false);
-      result.reconciliation.push({
+      if (first) result.reconciliation.push({
         runId: "run-gate",
         taskId: "task-gate",
         initialState: "verifying",
@@ -162,9 +163,10 @@ test("stops immediately at a human gate", async () => {
         ciWaitDetail: null,
         failureReason: null,
       });
+      first = false;
       return result;
     },
-  });
+  }, { sleep: async () => undefined });
   try {
     const result = await controller.run({
       enabled: true,
@@ -176,8 +178,8 @@ test("stops immediately at a human gate", async () => {
       pollIntervalMs: 1,
       globalConcurrency: 1,
     });
-    assert.equal(result.stopReason, "human-gate");
-    assert.equal(calls, 1);
+    assert.equal(result.stopReason, "no-progress");
+    assert.ok(calls > 1, "unrelated projects should continue after one human gate");
   } finally {
     runs.close();
     projects.close();
@@ -298,11 +300,12 @@ test("passes an explicit parallel ceiling to the bounded run-once controller", a
   const projects = projectsFixture();
   const runs = new RunStore();
   const requests: RunOnceRequest[] = [];
+  let first = true;
   const controller = new AutopilotController(projects, runs, {
     run: async (request) => {
       requests.push(request);
       const result = resultFixture(request.projectId, "worker-a", false);
-      result.reconciliation.push({
+      if (first) result.reconciliation.push({
         runId: "stop-after-capacity-check",
         taskId: "TASK-GATE",
         initialState: "verified",
@@ -322,9 +325,10 @@ test("passes an explicit parallel ceiling to the bounded run-once controller", a
         ciWaitDetail: null,
         failureReason: null,
       });
+      first = false;
       return result;
     },
-  });
+  }, { sleep: async () => undefined });
   try {
     const result = await controller.run({
       enabled: true,
@@ -337,8 +341,8 @@ test("passes an explicit parallel ceiling to the bounded run-once controller", a
       globalConcurrency: 3,
     });
 
-    assert.equal(result.stopReason, "human-gate");
-    assert.equal(requests.length, 1);
+    assert.equal(result.stopReason, "no-progress");
+    assert.ok(requests.length > 1);
     assert.equal(requests[0]?.maxClaims, 3);
   } finally {
     runs.close();
@@ -413,10 +417,17 @@ test("retries transient delivery failures until the bounded no-progress stop", a
   }
 });
 
-test("a terminal failure stops the session even when another item is retryable", async () => {
+test("one terminal task failure is quarantined while unrelated work continues", async () => {
   const projects = projectsFixture();
   const runs = new RunStore();
   let calls = 0;
+  const terminalRunId = seedFailedRun(
+    runs,
+    "fixture/one",
+    "TASK-TERMINAL",
+    "terminal-revision",
+    "verified-workspace-drifted",
+  );
   const controller = new AutopilotController(projects, runs, {
     run: async (request) => {
       calls += 1;
@@ -424,7 +435,7 @@ test("a terminal failure stops the session even when another item is retryable",
       result.ok = false;
       result.reconciled.push({
         taskId: "TASK-TERMINAL",
-        runId: "run-terminal",
+        runId: terminalRunId,
         state: "failed",
         execution: "not-run",
         worker: null,
@@ -466,8 +477,9 @@ test("a terminal failure stops the session even when another item is retryable",
       globalConcurrency: 1,
     });
 
-    assert.equal(result.stopReason, "run-failure");
-    assert.equal(calls, 1);
+    assert.equal(result.stopReason, "no-progress");
+    assert.ok(calls > 1);
+    assert.deepEqual(result.report.quarantined.map((entry) => entry.taskId), ["TASK-TERMINAL"]);
   } finally {
     runs.close();
     projects.close();
@@ -557,8 +569,8 @@ test("pending required CI is progress until its bounded wait expires", async () 
       globalConcurrency: 1,
     });
 
-    assert.equal(expired.stopReason, "ci-wait-timeout");
-    assert.equal(calls, 1);
+    assert.equal(expired.stopReason, "no-progress");
+    assert.ok(calls > 1);
     assert.deepEqual(expired.report.ciWaitTimeouts, [{
       projectId: "fixture/one",
       taskId: "TASK-WAITING",
@@ -566,6 +578,131 @@ test("pending required CI is progress until its bounded wait expires", async () 
       pullRequestUrl: "https://example.invalid/pull/waiting",
       detail: "Required checks are not complete: node-tests (pending)",
     }]);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("stops only after three distinct task revisions are quarantined", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  const failures = ["TASK-A", "TASK-B", "TASK-C"].map((taskId, index) => ({
+    taskId,
+    runId: seedFailedRun(runs, "fixture/one", taskId, `revision-${index}`, "ci-failed"),
+  }));
+  let calls = 0;
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      calls += 1;
+      const result = resultFixture(request.projectId, "worker-a", false);
+      result.ok = false;
+      if (request.projectId === "fixture/one") {
+        result.reconciled.push(...failures.map((failure) => ({
+          taskId: failure.taskId,
+          runId: failure.runId,
+          state: "failed",
+          execution: "not-run" as const,
+          worker: null,
+          workspacePath: null,
+          delivery: "failed" as const,
+          pullRequestUrl: null,
+          ciStatus: "failed",
+          ciWaitExpired: false,
+          ciWaitDetail: null,
+          failureReason: "ci-failed",
+        })));
+      }
+      return result;
+    },
+  }, { sleep: async () => undefined });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "failure-budget",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+      maxTaskFailures: 3,
+    });
+
+    assert.equal(result.stopReason, "failure-budget");
+    assert.equal(calls, 1);
+    assert.deepEqual(result.report.quarantined.map((entry) => entry.taskId), [
+      "TASK-A",
+      "TASK-B",
+      "TASK-C",
+    ]);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("a crash-resumed execution enforces its existing failure budget before another project pass", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  const execution = runs.startOrResumeAutopilot(100).execution;
+  for (const [index, taskId] of ["TASK-A", "TASK-B", "TASK-C"].entries()) {
+    const runId = seedFailedRun(runs, "fixture/one", taskId, `revision-${index}`, "ci-failed");
+    runs.recordAutopilotQuarantine(execution.id, runId, "ci-failed", 110 + index);
+  }
+  let calls = 0;
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      calls += 1;
+      return resultFixture(request.projectId, "worker-a", false);
+    },
+  }, { now: () => 200 });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "resumed-failure-budget",
+      leaseDurationMs: 1_000,
+      deadlineAt: 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+      maxTaskFailures: 3,
+    });
+    assert.equal(result.stopReason, "failure-budget");
+    assert.equal(result.resumedAfterInterruption, true);
+    assert.equal(result.startedAt, 100);
+    assert.equal(calls, 0);
+    assert.equal(result.report.quarantined.length, 3);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("a merge-policy preflight error remains a global stop before any task quarantine", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  const controller = new AutopilotController(projects, runs, {
+    run: async () => {
+      throw new Error("Automatic merge cannot prove a single safe GitHub Actions producer");
+    },
+  });
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "preflight",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+    assert.equal(result.stopReason, "run-failure");
+    assert.deepEqual(result.report.quarantined, []);
   } finally {
     runs.close();
     projects.close();
@@ -632,6 +769,7 @@ function resultFixture(
     duplicateTaskIds: claimed ? [] : [task.taskId],
     capacityReached: false,
     limitReached: false,
+    prerequisiteBlocks: [],
   };
 }
 
@@ -684,4 +822,25 @@ function seedMorningReport(runs: RunStore): void {
     maxAttempts: 1,
   });
   runs.reclaimExpired(second.run.id, "restarted", 3, 1);
+}
+
+function seedFailedRun(
+  runs: RunStore,
+  projectId: string,
+  taskId: string,
+  revision: string,
+  failureReason: string,
+): string {
+  const claimed = runs.claim({
+    projectId,
+    taskId,
+    revision,
+    baseSha: "base-a",
+    workerId: "overnight",
+    now: 1,
+    leaseDurationMs: 100,
+    maxAttempts: 1,
+  });
+  runs.transition(claimed.run.id, "failed", 2, { failureReason });
+  return claimed.run.id;
 }

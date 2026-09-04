@@ -66,6 +66,9 @@ function approvedTasks(
   const byNumber = new Map(issues.map((issue) => [issue.number, issue]));
   const desiredTasks = new Set(handoff.tasks.map(({ taskId }) => taskId));
   const remoteTaskIds = new Map<string, number>();
+  const prerequisites = new Map(
+    handoff.executionPrerequisites.map((prerequisite) => [prerequisite.id, prerequisite]),
+  );
   for (const issue of issues) {
     for (const managedId of managedTaskIds(issue.body, handoff.requirementsSetId)) {
       const previous = remoteTaskIds.get(managedId);
@@ -110,6 +113,11 @@ function approvedTasks(
       sourceRefs: [...task.sourceRefs],
       acceptanceCriteria: [...task.acceptanceCriteria],
       verificationExpectations: [...task.verificationExpectations],
+      executionPrerequisites: task.prerequisiteIds.map((id) => {
+        const prerequisite = prerequisites.get(id);
+        if (!prerequisite) throw new Error(`Approved task ${task.taskId} has missing prerequisite ${id}`);
+        return { id, verificationCommand: prerequisite.verificationCommand };
+      }),
     };
   });
 }

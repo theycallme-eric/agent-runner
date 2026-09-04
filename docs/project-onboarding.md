@@ -68,9 +68,13 @@ delivery:
 ```
 
 Use `merge: after-required-checks` when the approved DAG should run autonomously. GitHub must already
-have strict protection on `project.baseBranch` with at least one required status check; both dry run
-and real execution fail before a claim or coding-agent launch if that safeguard is missing. Use
-`merge: never` when every pull request should remain a human merge. These are execution policies, not
+have the supported single-producer GitHub Actions topology, strict administrator-bound protection,
+app-pinned required checks, and no required approving reviews on `project.baseBranch`; both dry run
+and real execution fail before a claim or coding-agent launch if that safeguard is missing. A new
+unprotected repository can use the separate support-tooling setup skill to preview and explicitly
+apply product-owned CI and the matching rule from an approved handoff. Agent Runner itself never
+installs or repairs that setup. Use `merge: never` when every pull request should remain a human
+merge. These are execution policies, not
 publication or licensing choices. See [Protected automatic merge](automatic-merge.md).
 
 The task provider normalizes task id, revision, title, prompt, status, and dependency references. The

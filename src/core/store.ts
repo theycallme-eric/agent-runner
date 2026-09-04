@@ -4,6 +4,8 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import {
   RUN_STATES,
   type CapacityClaimResult,
+  type AutopilotExecutionRecord,
+  type AutopilotQuarantineRecord,
   type ClaimRequest,
   type ClaimResult,
   type DeliveryCiStatus,
@@ -81,6 +83,23 @@ interface RunDeliveryRow {
   draft: number;
   ci_status: string;
   updated_at: number;
+}
+
+interface AutopilotExecutionRow {
+  id: string;
+  started_at: number;
+  finished_at: number | null;
+  stop_reason: string | null;
+}
+
+interface AutopilotQuarantineRow {
+  execution_id: string;
+  run_id: string;
+  project_id: string;
+  task_id: string;
+  revision: string;
+  reason: string;
+  recorded_at: number;
 }
 
 export interface WorkspaceEvidence {
@@ -665,6 +684,86 @@ export class RunStore {
     return row ? mapDelivery(row) : null;
   }
 
+  /** Resume the one crash-interrupted execution, or open a fresh owner-authorized execution. */
+  startOrResumeAutopilot(now: number): { execution: AutopilotExecutionRecord; resumed: boolean } {
+    this.#database.exec("BEGIN IMMEDIATE;");
+    try {
+      const active = this.#database
+        .prepare("SELECT * FROM autopilot_executions WHERE finished_at IS NULL ORDER BY started_at LIMIT 1")
+        .get() as AutopilotExecutionRow | undefined;
+      if (active) {
+        this.#database.exec("COMMIT;");
+        return { execution: mapAutopilotExecution(active), resumed: true };
+      }
+      const id = randomUUID();
+      this.#database
+        .prepare("INSERT INTO autopilot_executions (id, started_at) VALUES (?, ?)")
+        .run(id, now);
+      this.#database.exec("COMMIT;");
+      return {
+        execution: { id, startedAt: now, finishedAt: null, stopReason: null },
+        resumed: false,
+      };
+    } catch (error) {
+      this.#database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  finishAutopilot(executionId: string, now: number, stopReason: string): void {
+    const result = this.#database
+      .prepare(`
+        UPDATE autopilot_executions
+        SET finished_at = ?, stop_reason = ?
+        WHERE id = ? AND finished_at IS NULL
+      `)
+      .run(now, stopReason, executionId);
+    if (result.changes !== 1) {
+      throw new Error(`Active autopilot execution not found: ${executionId}`);
+    }
+  }
+
+  recordAutopilotQuarantine(
+    executionId: string,
+    runId: string,
+    reason: string,
+    now: number,
+  ): void {
+    if (reason.trim() === "") throw new Error("Autopilot quarantine reason must be non-empty");
+    this.#require(runId);
+    const execution = this.#database
+      .prepare("SELECT id FROM autopilot_executions WHERE id = ? AND finished_at IS NULL")
+      .get(executionId);
+    if (!execution) throw new Error(`Active autopilot execution not found: ${executionId}`);
+    this.#database
+      .prepare(`
+        INSERT INTO autopilot_quarantines (execution_id, run_id, reason, recorded_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(execution_id, run_id) DO NOTHING
+      `)
+      .run(executionId, runId, reason, now);
+  }
+
+  autopilotQuarantines(executionId: string): AutopilotQuarantineRecord[] {
+    const rows = this.#database.prepare(`
+      SELECT q.execution_id, q.run_id, q.reason, q.recorded_at,
+             r.project_id, r.task_id, r.revision
+      FROM autopilot_quarantines q
+      JOIN runs r ON r.id = q.run_id
+      WHERE q.execution_id = ?
+      ORDER BY q.recorded_at, r.project_id, r.task_id, r.revision
+    `).all(executionId) as unknown as AutopilotQuarantineRow[];
+    return rows.map((row) => ({
+      executionId: row.execution_id,
+      runId: row.run_id,
+      projectId: row.project_id,
+      taskId: row.task_id,
+      revision: row.revision,
+      reason: row.reason,
+      recordedAt: row.recorded_at,
+    }));
+  }
+
   #migrate(): void {
     this.#database.exec(`
       CREATE TABLE IF NOT EXISTS runs (
@@ -728,6 +827,25 @@ export class RunStore {
         ci_status TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS autopilot_executions (
+        id TEXT PRIMARY KEY,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER,
+        stop_reason TEXT
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS one_active_autopilot_execution
+        ON autopilot_executions ((finished_at IS NULL))
+        WHERE finished_at IS NULL;
+
+      CREATE TABLE IF NOT EXISTS autopilot_quarantines (
+        execution_id TEXT NOT NULL REFERENCES autopilot_executions(id),
+        run_id TEXT NOT NULL REFERENCES runs(id),
+        reason TEXT NOT NULL,
+        recorded_at INTEGER NOT NULL,
+        PRIMARY KEY (execution_id, run_id)
+      );
     `);
   }
 
@@ -784,6 +902,15 @@ function mapRun(row: RunRow): RunRecord {
     failureReason: row.failure_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function mapAutopilotExecution(row: AutopilotExecutionRow): AutopilotExecutionRecord {
+  return {
+    id: row.id,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    stopReason: row.stop_reason,
   };
 }
 

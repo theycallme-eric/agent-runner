@@ -84,8 +84,8 @@ test("rejects modified, unknown-version, and product-injected handoffs", async (
     const handoff = JSON.parse(fixture.handoffText) as { version: number; tasks: Array<{ title: string }> };
     handoff.tasks[0]!.title = "Tampered";
     assert.throws(() => parseApprovedHandoff(JSON.stringify(handoff)), /hash does not match/);
-    handoff.version = 2;
-    assert.throws(() => parseApprovedHandoff(JSON.stringify(handoff)), /handoff.version must be 1/);
+    handoff.version = 3;
+    assert.throws(() => parseApprovedHandoff(JSON.stringify(handoff)), /handoff.version must be 2/);
 
     const injectedPath = join(fixture.productRoot, "APPROVED_HANDOFF.json");
     writeFileSync(injectedPath, fixture.handoffText);
@@ -167,7 +167,7 @@ function approvedFixture(options: { active?: boolean } = {}) {
     reason: "fixture",
   }, null, 2)}\n`);
   const handoffUnsigned = {
-    version: 1,
+    version: 2,
     createdAt: "2026-09-02T22:06:00.000Z",
     repository: "example/repo",
     baseBranch: "main",
@@ -180,6 +180,12 @@ function approvedFixture(options: { active?: boolean } = {}) {
     graphSha256: graph.graphSha256,
     approvalPointerPath,
     approvalRecordPath,
+    repositoryReadiness: {
+      runtime: "Node.js 24",
+      dependencyInstallCommand: null,
+      verificationCommands: ["npm test"],
+    },
+    executionPrerequisites: [],
     tasks: graph.issues.map((issue) => ({
       taskId: issue.taskId,
       issueNumber: issue.issueNumber,
@@ -192,6 +198,7 @@ function approvedFixture(options: { active?: boolean } = {}) {
       acceptanceCriteria: [`Task ${issue.issueNumber} works.`],
       verificationExpectations: [`npm test -- task-${issue.issueNumber}`],
       dependencies: issue.blockedByTaskIds,
+      prerequisiteIds: [],
     })),
   };
   const handoff = { ...handoffUnsigned, handoffSha256: hash(handoffUnsigned) };
@@ -283,4 +290,3 @@ function sortValue(value: unknown): unknown {
   }
   return value;
 }
-

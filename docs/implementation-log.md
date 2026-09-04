@@ -669,3 +669,36 @@ transcripts or secrets here.
   `08abb94`; requirements-builder 32 tests pass; `node scripts/verify-all.mjs` reports every tool
   green. All coverage uses the fake `gh`/`git` scripts or in-memory fakes. No live GitHub state, no
   product repository, and no other support tool was touched.
+
+## 2026-09-04 — WP-09 bounded autonomous-delivery stabilization
+
+- Added a fail-closed pre-claim GitHub Actions topology preflight for the deliberately narrow
+  automatic lane: one static producer per required context, ordinary pull-request opened/synchronize
+  events, app-pinned checks, strict administrator-bound protection, and no required approving
+  reviews. Unsupported filters, dynamic/matrix/reusable/conditional jobs, duplicate producers,
+  unknown apps, malformed workflows, and unmapped contexts refuse before a claim.
+- Corrected required-check aggregation at both coordinator and final merge gates. For every exact
+  context/app/head identity, failure or cancellation wins; otherwise pending or skipped waits; only
+  one or more all-success rows pass. No row and incomplete pagination remain unproven.
+- Removed the draft-to-ready transition and settling observation from automatic mode. Automatic
+  pull requests are ready from creation; `merge: never` pull requests remain draft. An unexpected
+  automatic-mode draft is a named terminal inconsistency, and the final exact-head protection/check
+  reread remains mandatory.
+- Preserved the existing remote-mutation recovery model: publication reconciles by stable branch and
+  persisted pull-request identity; merge recovery recognizes the exact remotely merged head; issue
+  completion happens only after that proof and is safe to retry. Regression coverage exercises
+  publication-before-local-persistence and merge-before-issue-completion recovery.
+- Made unattended waiting operationally bounded without using time as safety evidence. The CI-wait
+  default is 60 minutes. Task-local terminal failures and CI timeouts are quarantined while unrelated
+  branches continue; three distinct task revisions stop new work by default. Owner-execution and
+  quarantine state survive process interruption, repeated observations count once, and global
+  approval/repository/preflight/worker/quota failures still stop immediately. Material progress
+  triggers another pass immediately; only observation-only passes sleep.
+- Consumed Requirements Builder handoff version 2, including exact repository-readiness agreement
+  with the external Runner contract and named, non-secret, task-scoped execution prerequisites.
+  Failed prerequisite verification blocks only linked ready tasks before claims or worker calls.
+- Evidence: the full Agent Runner suite passes 128 deterministic tests. New tests cover safe and
+  ambiguous topology, required reviews, conflicting duplicate check rows, ready-from-creation
+  publication, unexpected drafts, cumulative failure budget, crash-persistent execution state,
+  global preflight stops, crash-resumed failure budgets, protected CI workflow paths, and task-scoped
+  prerequisites. No live GitHub state, product repository, worker model, or user project was touched.

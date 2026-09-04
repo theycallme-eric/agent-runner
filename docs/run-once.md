@@ -42,7 +42,7 @@ classifies nonterminal runs by lease, workspace, worker evidence, branch, pull r
 Live leases are not stolen. Expired active attempts are reclaimed within their budget. Published runs
 use their persisted pull-request identity and poll CI without relaunching the worker or republishing.
 If the base advanced, the controller checkpoints synchronization, merges in the isolated worktree,
-reruns every required verification command, and only then updates the same draft. Conflicts, missing
+reruns every required verification command, and only then updates the same pull request. Conflicts, missing
 workspaces, changed or closed pull requests, and exhausted attempts fail with durable evidence. See
 [Reconciliation](reconciliation.md).
 
@@ -52,10 +52,9 @@ against that new base before it can merge. A transient merge or issue-completion
 durable pull-request identity rather than relaunching the worker.
 
 GitHub repositories with no required checks report CI as `none`. That is a valid observation, not a
-passed check suite: the run remains at `ci` with `waiting-ci`, the pull request remains a draft, and
-automatic merge cannot proceed. Under the review-only policy, the draft remains available for human
-review. Under the automatic policy, the repository must be configured correctly before the run is
-started.
+passed check suite. Under the review-only policy, the draft remains available for human review.
+Under the automatic policy, the stricter topology/protection preflight refuses before a claim, so
+an unprotected project cannot reach publication or spend model usage.
 
 The JSON result reports the inspected graph, detailed reconciliation classifications, new claims,
 duplicate task ids, capacity/limit stops, non-secret worker identity, workspace, pull-request URL,

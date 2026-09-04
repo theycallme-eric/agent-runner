@@ -67,6 +67,23 @@ export interface RunDeliveryRecord {
   updatedAt: number;
 }
 
+export interface AutopilotExecutionRecord {
+  id: string;
+  startedAt: number;
+  finishedAt: number | null;
+  stopReason: string | null;
+}
+
+export interface AutopilotQuarantineRecord {
+  executionId: string;
+  runId: string;
+  projectId: string;
+  taskId: string;
+  revision: string;
+  reason: string;
+  recordedAt: number;
+}
+
 export interface ClaimRequest extends TaskRef {
   workerId: string;
   now: number;

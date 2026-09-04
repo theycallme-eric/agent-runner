@@ -30,17 +30,23 @@ export function reconcileRequiredChecks(
     }
     const fromSource = named.filter((check) => check.appId === required.appId);
     const onHead = fromSource.filter((check) => check.headSha === headSha);
-    if (onHead.some((check) => check.bucket === "pass")) {
-      satisfied.push(required.context);
-      continue;
-    }
+    // A passing duplicate must never mask a failing, cancelled, pending, or skipped producer.
+    // The topology preflight proves there is one configured producer; this aggregation still
+    // fails closed if GitHub reports conflicting rows for that identity.
     if (onHead.some((check) => check.bucket === "fail" || check.bucket === "cancel")) {
       const blocking = onHead.find((check) => check.bucket === "fail" || check.bucket === "cancel");
       failed.push(`${required.context} (${blocking?.bucket ?? "fail"})`);
       continue;
     }
-    if (onHead.length > 0) {
-      waiting.push(`${required.context} (${onHead[0]?.bucket ?? "pending"})`);
+    const inconclusive = onHead.find((check) =>
+      check.bucket === "pending" || check.bucket === "skipping"
+    );
+    if (inconclusive) {
+      waiting.push(`${required.context} (${inconclusive.bucket})`);
+      continue;
+    }
+    if (onHead.some((check) => check.bucket === "pass")) {
+      satisfied.push(required.context);
       continue;
     }
     if (fromSource.length > 0) {

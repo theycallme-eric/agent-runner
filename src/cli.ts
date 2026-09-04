@@ -240,7 +240,7 @@ async function runOnceCommand(argumentsList: string[]): Promise<void> {
   const maxClaims = positiveOption(argumentsList, "--limit", 1);
   const targetTaskId = option(argumentsList, "--task");
   const leaseDurationMs = positiveOption(argumentsList, "--lease-seconds", 300) * 1_000;
-  const maxCiWaitMinutes = positiveOption(argumentsList, "--max-ci-wait-minutes", 30);
+  const maxCiWaitMinutes = positiveOption(argumentsList, "--max-ci-wait-minutes", 60);
   const controllerId = option(argumentsList, "--controller") ?? `${hostname()}-${process.pid}`;
   const dryRun = argumentsList.includes("--dry-run");
   const ghExecutable = process.env.AGENT_RUNNER_GH_BIN ?? "gh";
@@ -338,7 +338,8 @@ async function autopilotCommand(argumentsList: string[]): Promise<void> {
   const pollIntervalMs = positiveOption(argumentsList, "--poll-seconds", 60) * 1_000;
   const globalConcurrency = positiveOption(argumentsList, "--concurrency", 1);
   const leaseDurationMs = positiveOption(argumentsList, "--lease-seconds", 300) * 1_000;
-  const maxCiWaitMinutes = positiveOption(argumentsList, "--max-ci-wait-minutes", 30);
+  const maxCiWaitMinutes = positiveOption(argumentsList, "--max-ci-wait-minutes", 60);
+  const maxTaskFailures = positiveOption(argumentsList, "--max-task-failures", 3);
   const controllerId = option(argumentsList, "--controller") ?? `${hostname()}-${process.pid}`;
   const ghExecutable = process.env.AGENT_RUNNER_GH_BIN ?? "gh";
   const gitExecutable = process.env.AGENT_RUNNER_GIT_BIN ?? "git";
@@ -413,9 +414,10 @@ async function autopilotCommand(argumentsList: string[]): Promise<void> {
       maxNoProgressPasses,
       pollIntervalMs,
       globalConcurrency,
+      maxTaskFailures,
     });
     print(result);
-    if (["run-failure", "worker-unavailable", "quota-unavailable"].includes(result.stopReason)) {
+    if (["run-failure", "failure-budget", "worker-unavailable", "quota-unavailable"].includes(result.stopReason)) {
       process.exitCode = 1;
     }
   } finally {
@@ -484,7 +486,7 @@ function usage(): void {
     [--controller <id>] [--lease-seconds <seconds>] [--max-ci-wait-minutes <minutes>]
   agent-runner autopilot --enable [--minutes <count>] [--max-new-claims <count>]
     [--concurrency <count>] [--no-progress-passes <count>] [--poll-seconds <seconds>]
-    [--max-ci-wait-minutes <minutes>] [--state <database>]
+    [--max-ci-wait-minutes <minutes>] [--max-task-failures <count>] [--state <database>]
     [--profiles <worker-config>] [--workspace-root <directory>] [--controller <id>]
     [--lease-seconds <seconds>]`);
   process.exitCode = 2;

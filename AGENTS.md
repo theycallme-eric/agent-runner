@@ -14,6 +14,11 @@ failing CI, protected-path changes, and human gates before real unattended execu
 
 Do not add secrets, credentials, raw private transcripts, or personal project data. Never enable
 automatic merging without a separately reviewed policy and protected-branch enforcement.
+Automatic merging must fail closed unless every required check has one positively established,
+app-pinned producer in the supported topology. Reconcile every row for the exact check/app/head
+identity; absence, ambiguity, pending, or skipped work is never a pass. When safety depends on a
+remote mutation, persist intent before the call or document and test an unambiguous idempotent
+reconciliation path. Do not add timing delays as substitutes for state evidence.
 
 For material implementation sessions, append a concise, factual entry to
 `docs/implementation-log.md`: what changed, what failed, the correction, evidence, and the next open

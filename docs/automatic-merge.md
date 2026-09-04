@@ -27,30 +27,41 @@ base branch to have:
   token that can merge, including the owner's administrator token; and
 - every required check provided by a specific GitHub App. A context added through the legacy
   `contexts` list, or left without a reporting application, accepts a result from any source, so
-  the preflight refuses it by name and asks for an application to be configured.
+  the preflight refuses it by name and asks for an application to be configured;
+- zero required approving reviews, because the unattended lane cannot supply an independent human
+  approval for every node; and
+- an external Runner contract that gates `.github/workflows/**` for human review, preventing a
+  normal implementation node from changing its own merge proof; and
+- one statically named GitHub Actions job for each required context, on ordinary `pull_request`
+  `opened` and `synchronize` events, with no path/branch filters, matrix/dynamic name, reusable job,
+  conditional producer, or duplicate producer.
+
+This first automatic lane is deliberately narrow. Unsupported or ambiguous topology fails during
+dry run before a claim, branch, worker call, pull request, or model cost. Absence of a check row is
+never treated as proof that another producer cannot appear. The same live preflight runs again at
+the final merge gate, so base/workflow/protection changes are not trusted from an earlier pass.
 
 For each node, the controller still requires a clean isolated workspace, a non-empty committed
 change, independent task and project verification, no protected-path gate, an unchanged base, and a
-passing required CI result. The GitHub adapter then marks the exact persisted draft ready and uses an
-exact-head guard while squash-merging. It rechecks branch protection immediately before merging.
+passing required CI result. The GitHub adapter creates automatic-mode pull requests ready from the
+outset and uses an exact-head guard while squash-merging. `merge: never` still creates drafts. An
+unexpected draft in automatic mode is a terminal inconsistency; the Runner never changes review
+mode in flight. It rechecks branch protection immediately before merging.
 
 ## What counts as a passing required check
 
-A required context is satisfied only by a check run that carries all four of: the required context
+A required context is satisfied only by check runs that carry all four of: the required context
 name, the GitHub App branch protection pins that context to, the exact verified head commit, and a
 completed successful result. The evidence comes from the check-runs API for that commit rather than
 from `gh pr checks`, because only the former reports the reporting application and the head it ran
 against. A commit status is therefore never accepted as proof, and a listing that is too large to
 read in one page proves nothing rather than being trusted as far as it goes.
 
-Marking a draft ready can itself trigger a `ready_for_review` workflow, and GitHub does not promise
-that such a run exists by the time the ready request returns. The adapter therefore stops after
-marking the draft ready and merges no earlier than a later pass, and the controller discards the
-first required-check reading taken after that transition. A required check that does not rerun on
-the ready event is unaffected: its earlier result is still the latest run for that context on the
-same head, so the node merges once the settling reading is taken. The equivalent window for a new
-commit is already closed by matching the head, because a commit whose runs have not registered
-carries no earlier pass to mistake for a current one.
+Every row for the exact `(context, app, verified head)` identity is reconciled together. Any failure
+or cancellation fails the context. Otherwise, any pending or skipped row keeps it waiting. Only one
+or more rows that are all successful pass. No matching row waits. This same decision function is
+used during coordination and immediately before merge. Because automatic pull requests are ready
+from creation, there is no draft-to-ready event, settling observation, or fixed per-node delay.
 
 Only after GitHub reports that exact pull request head as merged does the adapter close the numeric
 source issue as completed. Closing the issue refreshes the native DAG on the next pass, allowing its
@@ -68,12 +79,15 @@ the worker or provider is unavailable; retries are exhausted; or the bounded una
 reached its time, claim, or no-progress limit. Retryable GitHub delivery errors remain in durable
 state and are retried until that bounded limit instead of being mistaken for completed work.
 
-A required context that has not reported, is still queued, or was skipped or cancelled is not a
-pass: the Runner waits instead of merging. Each waiting pull request carries its own persistent
-wait clock, bounded by `--max-ci-wait-minutes` (default 30) or the contract's
-`delivery.maxCiWaitMinutes`. When that bound passes, an unattended session stops with the
-`ci-wait-timeout` reason and names the pull request and outstanding checks. The clock never fails
-or transitions the run, so the session resumes from durable state once the checks report.
+A required context that has not reported, is still queued, or was skipped is not a pass; cancelled
+and failed contexts fail. Each waiting pull request carries its own persistent wait clock, bounded
+by `--max-ci-wait-minutes` (default 60) or the contract's `delivery.maxCiWaitMinutes`. The clock is an
+operational bound, never part of the merge proof. On expiry, that task revision is quarantined with
+its pull request and outstanding contexts while unrelated ready branches continue. Failed task
+revisions are quarantined the same way. The default cumulative budget is three distinct quarantined
+task revisions per owner-authorized autopilot execution, including crashes/restarts; the third stops
+new work. Approval drift, repository/preflight failure, missing worker, or exhausted quota remains
+immediately session-fatal rather than task-local.
 
 ## Build branch and final release
 

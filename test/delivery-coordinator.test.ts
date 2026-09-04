@@ -194,6 +194,36 @@ test("automatically merges the exact verified head and completes its source task
   }
 });
 
+test("an automatic-mode publisher that creates a draft fails as a named inconsistency", async () => {
+  const context = setup();
+  context.request.contract = automaticMergeContract;
+  const publisher = fakePublisher(
+    async (request) => ({ ...pullRequest(request, "104-draft"), draft: true }),
+    async () => { throw new Error("CI must not be observed for an inconsistent draft"); },
+  );
+  publisher.validateAutomaticMerge = async () => ({
+    evidence: ["strict protected branch"],
+    requiredChecks: [{ context: "node-tests", appId: NODE_TESTS_APP }],
+  });
+  publisher.observeRequiredChecks = async () => {
+    throw new Error("required checks must not be observed for an inconsistent draft");
+  };
+  publisher.mergeVerified = async () => {
+    throw new Error("an inconsistent draft must not be merged");
+  };
+  const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
+    now: tickingClock(),
+  });
+
+  try {
+    const result = await coordinator.deliver(context.request);
+    assert.equal(result.outcome, "failed");
+    assert.equal(result.run.failureReason, "automatic-pull-request-is-draft");
+  } finally {
+    context.runs.close();
+  }
+});
+
 test("an unreported required context downgrades an apparent pass to waiting", async () => {
   const context = setup();
   context.request.contract = automaticMergeContract;
@@ -238,6 +268,48 @@ test("an unreported required context downgrades an apparent pass to waiting", as
     assert.match(JSON.stringify(evidence[0]?.detail), /node-tests/);
   } finally {
     context.runs.close();
+  }
+});
+
+test("conflicting exact-identity rows override a pass at the coordinator gate", async () => {
+  for (const [bucket, outcome] of [
+    ["fail", "failed"],
+    ["cancel", "failed"],
+    ["pending", "waiting-ci"],
+    ["skipping", "waiting-ci"],
+  ] as const) {
+    const context = setup();
+    context.request.contract = automaticMergeContract;
+    const publisher = fakePublisher(
+      async (request) => pullRequest(request, `conflict-${bucket}`),
+      async () => ({
+        status: "passed",
+        evidence: [`node-tests: pass + ${bucket}`],
+        checks: [nodeTests("pass"), nodeTests(bucket)],
+      }),
+    );
+    publisher.validateAutomaticMerge = async () => ({
+      evidence: ["strict protected branch"],
+      requiredChecks: [{ context: "node-tests", appId: NODE_TESTS_APP }],
+    });
+    publisher.observeRequiredChecks = async (request) =>
+      publisher.checkCi(request, pullRequest(request, "observed"));
+    let mergeCalls = 0;
+    publisher.mergeVerified = async () => {
+      mergeCalls += 1;
+      throw new Error("a conflicting required check must not merge");
+    };
+    const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
+      now: tickingClock(),
+    });
+
+    try {
+      const result = await coordinator.deliver(context.request);
+      assert.equal(result.outcome, outcome, bucket);
+      assert.equal(mergeCalls, 0, bucket);
+    } finally {
+      context.runs.close();
+    }
   }
 });
 
@@ -339,19 +411,15 @@ test("a bounded CI wait expires without failing or transitioning the run", async
   }
 });
 
-test("a pass read before the pull request became ready cannot complete the run", async () => {
-  // The observation never changes: the older pass from before the ready transition is still the
-  // latest run for the required context. The run must not complete on the readying pass, and must
-  // not complete on the first reading after it either.
+test("automatic work requests a ready pull request and can merge on its first exact passing read", async () => {
   const context = setup();
   context.request.contract = automaticMergeContract;
-  let observations = 0;
   const publisher = fakePublisher(
-    async (request) => pullRequest(request, "108"),
-    async () => {
-      observations += 1;
-      return { status: "passed", evidence: ["node-tests: pass"], checks: [nodeTests("pass")] };
+    async (request) => {
+      assert.equal(request.draft, false);
+      return pullRequest(request, "108");
     },
+    async () => ({ status: "passed", evidence: ["node-tests: pass"], checks: [nodeTests("pass")] }),
   );
   publisher.validateAutomaticMerge = async () => ({
     evidence: ["strict protected branch"],
@@ -360,74 +428,39 @@ test("a pass read before the pull request became ready cannot complete the run",
   publisher.observeRequiredChecks = async (request) =>
     publisher.checkCi(request, pullRequest(request, "observed"));
   let mergeCalls = 0;
-  publisher.mergeVerified = async (_request, observed) => {
-    mergeCalls += 1;
-    return mergeCalls === 1
-      ? {
-          outcome: "waiting" as const,
-          pullRequest: { ...observed, draft: false },
-          reason: "The pull request was marked ready for review during this pass",
-          evidence: ["marked ready for review"],
-        }
-      : {
-          outcome: "merged" as const,
-          pullRequest: { ...observed, draft: false, state: "merged" as const },
-          taskCompleted: true,
-          evidence: ["exact verified head merged"],
-        };
-  };
+  publisher.mergeVerified = async (_request, observed) => ({
+    outcome: "merged" as const,
+    pullRequest: { ...observed, state: "merged" as const },
+    taskCompleted: true,
+    evidence: [`exact verified head merged on call ${++mergeCalls}`],
+  });
   const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
     now: tickingClock(),
   });
 
   try {
-    const readied = await coordinator.deliver(context.request);
-    const firstPostReady = await coordinator.deliver(context.request);
     const merged = await coordinator.deliver(context.request);
 
-    assert.equal(readied.outcome, "waiting-ci");
-    assert.equal(readied.run.state, "ci");
-    assert.equal(readied.ciWaitExpired, false);
-    assert.match(readied.message ?? "", /ready for review/);
-    assert.equal(context.runs.delivery(context.runId)?.draft, false);
-
-    assert.equal(firstPostReady.outcome, "waiting-ci");
-    assert.match(firstPostReady.message ?? "", /may not have registered yet/);
-    assert.equal(
-      context.runs.events(context.runId).filter((event) =>
-        event.type === "automatic-merge-settling"
-      ).length,
-      1,
-      "the first reading after ready must be discarded rather than merged",
-    );
-
     assert.equal(merged.outcome, "completed");
-    assert.equal(mergeCalls, 2);
-    assert.equal(observations, 3);
-    assert.equal(
-      context.runs.events(context.runId).filter((event) =>
-        event.type === "automatic-merge-deferred"
-      ).length,
-      1,
-    );
+    assert.equal(mergeCalls, 1);
+    assert.equal(context.runs.delivery(context.runId)?.draft, false);
     assert.equal(context.runs.ciWait(context.runId), null);
   } finally {
     context.runs.close();
   }
 });
 
-test("a check triggered by the ready transition keeps the run waiting until it passes", async () => {
+test("a pending required check keeps ready automatic work waiting until it passes", async () => {
   const context = setup();
   context.request.contract = automaticMergeContract;
   const readings: CiSnapshot[] = [
-    { status: "passed", evidence: ["stale pass"], checks: [nodeTests("pass")] },
-    { status: "pending", evidence: ["ready-triggered run queued"], checks: [nodeTests("pending")] },
-    { status: "passed", evidence: ["ready-triggered run passed"], checks: [nodeTests("pass")] },
+    { status: "pending", evidence: ["pull-request run queued"], checks: [nodeTests("pending")] },
+    { status: "passed", evidence: ["pull-request run passed"], checks: [nodeTests("pass")] },
   ];
   const publisher = fakePublisher(async (request) => pullRequest(request, "109"), async () => {
     const next = readings.shift() ?? {
       status: "passed" as const,
-      evidence: ["ready-triggered run passed"],
+      evidence: ["pull-request run passed"],
       checks: [nodeTests("pass")],
     };
     return next;
@@ -441,36 +474,25 @@ test("a check triggered by the ready transition keeps the run waiting until it p
   let mergeCalls = 0;
   publisher.mergeVerified = async (_request, observed) => {
     mergeCalls += 1;
-    return mergeCalls === 1
-      ? {
-          outcome: "waiting" as const,
-          pullRequest: { ...observed, draft: false },
-          reason: "The pull request was marked ready for review during this pass",
-          evidence: ["marked ready for review"],
-        }
-      : {
-          outcome: "merged" as const,
-          pullRequest: { ...observed, draft: false, state: "merged" as const },
-          taskCompleted: true,
-          evidence: ["exact verified head merged"],
-        };
+    return {
+      outcome: "merged" as const,
+      pullRequest: { ...observed, state: "merged" as const },
+      taskCompleted: true,
+      evidence: ["exact verified head merged"],
+    };
   };
   const coordinator = new DeliveryCoordinator(context.runs, context.repository, publisher, {
     now: tickingClock(),
   });
 
   try {
-    const readied = await coordinator.deliver(context.request);
     const queued = await coordinator.deliver(context.request);
-    const mergeCallsBeforeThePass = mergeCalls;
     const passed = await coordinator.deliver(context.request);
 
-    assert.equal(readied.outcome, "waiting-ci");
     assert.equal(queued.outcome, "waiting-ci");
     assert.match(queued.message ?? "", /node-tests \(pending\)/);
-    assert.equal(mergeCallsBeforeThePass, 1, "a queued required check must not reach the merge");
     assert.equal(passed.outcome, "completed");
-    assert.equal(mergeCalls, 2);
+    assert.equal(mergeCalls, 1, "a queued required check must not reach the merge");
   } finally {
     context.runs.close();
   }
@@ -668,7 +690,7 @@ function pullRequest(request: DraftPullRequestRequest, externalId: string): Pull
     branchName: request.branchName,
     baseBranch: request.baseBranch,
     headSha: request.headSha,
-    draft: true,
+    draft: request.draft,
     state: "open",
   };
 }

@@ -7,12 +7,12 @@ import {
 import type { PullRequestPublisherRegistry } from "../delivery/registry.js";
 import type { CommandRunner } from "../execution/command-runner.js";
 import { TaskExecutor, type TaskExecutionResult } from "../execution/task-executor.js";
-import type { ProjectPlanner } from "../planning/project-planner.js";
+import type { ProjectInspection, ProjectPlanner } from "../planning/project-planner.js";
 import {
   ReconciliationController,
   type ReconciliationResult,
 } from "../reconciliation/controller.js";
-import { loadProjectContract } from "../project-contract.js";
+import { loadProjectContract, type ProjectContract } from "../project-contract.js";
 import type { ProjectRegistryStore } from "../projects/registry.js";
 import type { WorkerProfileRegistry } from "../workers/registry.js";
 import type { BaseRevisionProvider } from "../workspaces/base-revision.js";
@@ -63,6 +63,7 @@ export interface RunOnceResult {
   duplicateTaskIds: string[];
   capacityReached: boolean;
   limitReached: boolean;
+  prerequisiteBlocks: Array<{ taskId: string; prerequisiteIds: string[] }>;
 }
 
 export interface RunOnceControllerOptions {
@@ -123,6 +124,7 @@ export class RunOnceController {
       ? this.#publishers.get(contract.delivery.provider)
       : null;
     if (contract.delivery.merge === "after-required-checks") {
+      assertAutomaticWorkflowProtected(contract);
       if (
         !publisher?.validateAutomaticMerge ||
         !publisher.observeRequiredChecks ||
@@ -139,7 +141,13 @@ export class RunOnceController {
       : await this.#baseRevisions.refresh(project.rootPath, contract.project.baseBranch);
     if (request.dryRun) {
       const inspected = await this.#planner.inspect(project, contract);
-      assertTargetReady(request.targetTaskId, inspected.graph.ready.map((task) => task.id));
+      const gated = await gateExecutionPrerequisites(
+        inspected,
+        project.rootPath,
+        contract.execution.timeoutMinutes * 60_000,
+        this.#commands,
+      );
+      assertTargetReady(request.targetTaskId, gated.inspection.graph.ready.map((task) => task.id));
       return {
         ok: true,
         dryRun: true,
@@ -147,21 +155,28 @@ export class RunOnceController {
         project: project.id,
         baseSha,
         workerProfile: project.workerProfile,
-        provider: inspected.provider,
-        dependencies: inspected.dependencies,
+        provider: gated.inspection.provider,
+        dependencies: gated.inspection.dependencies,
         deliveryProvider: publisher?.name ?? null,
-        ...graphFields(inspected.graph),
+        ...graphFields(gated.inspection.graph),
         claimed: [],
         reconciled: [],
         reconciliation: [],
         duplicateTaskIds: [],
         capacityReached: false,
-        limitReached: (request.targetTaskId ? 1 : inspected.graph.ready.length) > request.maxClaims,
+        limitReached: (request.targetTaskId ? 1 : gated.inspection.graph.ready.length) > request.maxClaims,
+        prerequisiteBlocks: gated.blocks,
       };
     }
 
     const inspected = await this.#planner.inspect(project, contract);
-    assertTargetReady(request.targetTaskId, inspected.graph.ready.map((task) => task.id));
+    const gated = await gateExecutionPrerequisites(
+      inspected,
+      project.rootPath,
+      contract.execution.timeoutMinutes * 60_000,
+      this.#commands,
+    );
+    assertTargetReady(request.targetTaskId, gated.inspection.graph.ready.map((task) => task.id));
     const reconciliation = await new ReconciliationController(
       this.#runs,
       this.#workspaces,
@@ -174,7 +189,7 @@ export class RunOnceController {
     ).reconcileProject({
       project,
       contract,
-      inspection: inspected,
+      inspection: gated.inspection,
       currentBaseSha: baseSha,
       controllerId: request.controllerId,
       leaseDurationMs: request.leaseDurationMs,
@@ -192,7 +207,7 @@ export class RunOnceController {
       leaseDurationMs: request.leaseDurationMs,
       maxClaims: request.maxClaims,
       ...(request.targetTaskId ? { taskIds: [request.targetTaskId] } : {}),
-    }, inspected);
+    }, gated.inspection);
     const executor = new TaskExecutor(
       this.#runs,
       this.#workspaces,
@@ -298,8 +313,67 @@ export class RunOnceController {
       duplicateTaskIds: plan.duplicateTaskIds,
       capacityReached: plan.capacityReached,
       limitReached: plan.limitReached,
+      prerequisiteBlocks: gated.blocks,
     };
   }
+}
+
+function assertAutomaticWorkflowProtected(contract: ProjectContract): void {
+  const protectedWorkflowDirectory = contract.verification.protectedPaths.some(
+    (rule) => rule.pattern === ".github/workflows/**" && rule.gate === "human",
+  );
+  if (!protectedWorkflowDirectory) {
+    throw new Error(
+      "Automatic merge requires verification.protectedPaths to gate .github/workflows/** for human review",
+    );
+  }
+}
+
+async function gateExecutionPrerequisites(
+  inspection: ProjectInspection,
+  repositoryPath: string,
+  timeoutMs: number,
+  commands: CommandRunner,
+): Promise<{
+  inspection: ProjectInspection;
+  blocks: Array<{ taskId: string; prerequisiteIds: string[] }>;
+}> {
+  const outcomes = new Map<string, Promise<boolean>>();
+  const blocks: Array<{ taskId: string; prerequisiteIds: string[] }> = [];
+  for (const task of inspection.graph.ready) {
+    const failed: string[] = [];
+    for (const prerequisite of task.executionPrerequisites ?? []) {
+      let outcome = outcomes.get(prerequisite.verificationCommand);
+      if (!outcome) {
+        outcome = commands.run({
+          command: prerequisite.verificationCommand,
+          cwd: repositoryPath,
+          timeoutMs,
+        }).then((result) => result.passed, () => false);
+        outcomes.set(prerequisite.verificationCommand, outcome);
+      }
+      if (!await outcome) failed.push(prerequisite.id);
+    }
+    if (failed.length > 0) {
+      blocks.push({ taskId: task.id, prerequisiteIds: failed.sort() });
+    }
+  }
+  if (blocks.length === 0) return { inspection, blocks };
+  const blockedIds = new Set(blocks.map((block) => block.taskId));
+  const newlyBlocked = inspection.graph.ready.filter((task) => blockedIds.has(task.id));
+  const blocked = [...inspection.graph.blocked, ...newlyBlocked]
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return {
+    inspection: {
+      ...inspection,
+      graph: {
+        ...inspection.graph,
+        ready: inspection.graph.ready.filter((task) => !blockedIds.has(task.id)),
+        blocked,
+      },
+    },
+    blocks,
+  };
 }
 
 function reconciliationDelivery(

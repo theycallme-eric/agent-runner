@@ -210,3 +210,39 @@ test("a per-pull-request CI wait clock survives a controller restart", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("an interrupted autopilot execution preserves its distinct task-revision quarantines", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-runner-autopilot-execution-"));
+  const databasePath = join(directory, "runs.sqlite");
+  const first = new RunStore(databasePath);
+  try {
+    const claimed = first.claim(request());
+    const started = first.startOrResumeAutopilot(10_000);
+    first.recordAutopilotQuarantine(started.execution.id, claimed.run.id, "ci-failed", 10_001);
+    first.recordAutopilotQuarantine(started.execution.id, claimed.run.id, "duplicate", 10_002);
+    first.close();
+
+    const restarted = new RunStore(databasePath);
+    try {
+      const resumed = restarted.startOrResumeAutopilot(20_000);
+      assert.equal(resumed.resumed, true);
+      assert.equal(resumed.execution.id, started.execution.id);
+      assert.deepEqual(restarted.autopilotQuarantines(resumed.execution.id).map((entry) => ({
+        taskId: entry.taskId,
+        revision: entry.revision,
+        reason: entry.reason,
+      })), [{ taskId: "ENV-01", revision: "revision-1", reason: "ci-failed" }]);
+      restarted.finishAutopilot(resumed.execution.id, 20_001, "no-progress");
+      assert.equal(restarted.startOrResumeAutopilot(30_000).resumed, false);
+    } finally {
+      restarted.close();
+    }
+  } finally {
+    try {
+      first.close();
+    } catch {
+      // The first connection was deliberately closed to simulate an interrupted process.
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
