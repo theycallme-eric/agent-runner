@@ -96,6 +96,7 @@ node dist/src/cli.js status
 node dist/src/cli.js ready <project-id>
 node dist/src/cli.js profiles --profiles /path/to/workers.yml
 node dist/src/cli.js run-once <project-id> --dry-run --profiles /path/to/workers.yml
+node dist/src/cli.js retry-failed <run-id> --additional-attempts 1 --confirm-retry
 node dist/src/cli.js autopilot --enable --minutes 480 --max-new-claims 20 --concurrency 2 \
   --max-ci-wait-minutes 60 --max-task-failures 3
 ```
@@ -112,6 +113,11 @@ public/private visibility choice and `--confirm-create`, refuses non-empty non-r
 wrong remotes, creates no product files, and is idempotent after a successful run. It uses an empty
 initial commit only so the configured base branch exists for later isolated work. Actual GitHub
 creation is an owner-authorized operation; deterministic tests use a local fake remote.
+
+`retry-failed` is the explicit owner recovery for an exhausted, retryable, pre-publication run. It
+only extends that run's recorded attempt ceiling; it does not launch a worker. A later `run-once` or
+`autopilot` pass claims the same task revision into a clean workspace. Runs with pull-request
+identity, safety/integrity failures, active attempts, or an unused configured attempt are refused.
 
 The built-in GitHub adapter reads issues and GitHub's native `blocked by` relationships. `ready` is
 read-only: it refreshes and validates the DAG but does not claim work or launch an agent.

@@ -187,6 +187,50 @@ export class RunStore {
     return row.count;
   }
 
+  authorizeFailedRetry(runId: string, additionalAttempts: number, now: number): RunRecord {
+    if (!Number.isInteger(additionalAttempts) || additionalAttempts < 1) {
+      throw new Error("additionalAttempts must be a positive integer");
+    }
+    this.#database.exec("BEGIN IMMEDIATE;");
+    try {
+      const row = this.#database
+        .prepare("SELECT * FROM runs WHERE id = ?")
+        .get(runId) as RunRow | undefined;
+      if (!row) throw new Error(`Unknown run: ${runId}`);
+      if (row.state !== "failed") {
+        throw new Error(`Run ${runId} is not failed`);
+      }
+      if (!isRetryableTaskFailure(row.failure_reason)) {
+        throw new Error(`Run ${runId} is not eligible for an implementation retry`);
+      }
+      if (row.attempt < row.max_attempts) {
+        throw new Error(`Run ${runId} already has a retry remaining`);
+      }
+      const delivery = this.#database
+        .prepare("SELECT 1 AS present FROM run_delivery WHERE run_id = ?")
+        .get(runId) as { present: number } | undefined;
+      if (delivery) {
+        throw new Error(`Run ${runId} has delivery identity and must be reconciled, not retried`);
+      }
+      const nextMaximum = row.max_attempts + additionalAttempts;
+      this.#database
+        .prepare("UPDATE runs SET max_attempts = ?, updated_at = ? WHERE id = ?")
+        .run(nextMaximum, now, runId);
+      this.#event(runId, now, "owner-retry-authorized", {
+        additionalAttempts,
+        previousMaximum: row.max_attempts,
+        newMaximum: nextMaximum,
+        failureReason: row.failure_reason,
+      });
+      const updated = this.#require(runId);
+      this.#database.exec("COMMIT;");
+      return updated;
+    } catch (error) {
+      this.#database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
   #claimTransaction(request: ClaimRequest, maxActive: number | null): CapacityClaimResult {
     const id = randomUUID();
     const expiresAt = request.now + request.leaseDurationMs;
@@ -232,6 +276,14 @@ export class RunStore {
           if (retried.changes !== 1) {
             throw new Error(`Failed to atomically retry run ${existing.id}`);
           }
+          this.#database.prepare(`
+            UPDATE run_execution
+            SET workspace_path = NULL, branch_name = NULL, worker_profile = NULL,
+                worker_name = NULL, worker_status = NULL, worker_model = NULL,
+                worker_session_id = NULL, worker_summary = NULL, worker_cost_usd = NULL,
+                worker_duration_ms = NULL, updated_at = ?
+            WHERE run_id = ?
+          `).run(request.now, existing.id);
           this.#event(existing.id, request.now, "task-retried", {
             previousFailureReason: existing.failure_reason,
             workerId: request.workerId,

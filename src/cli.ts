@@ -31,6 +31,9 @@ async function main(): Promise<void> {
     case "run-once":
       await runOnceCommand(argumentsList);
       return;
+    case "retry-failed":
+      await retryFailedCommand(argumentsList);
+      return;
     case "autopilot":
       await autopilotCommand(argumentsList);
       return;
@@ -325,6 +328,37 @@ async function runOnceCommand(argumentsList: string[]): Promise<void> {
   }
 }
 
+async function retryFailedCommand(argumentsList: string[]): Promise<void> {
+  const runId = argumentsList[0];
+  const rawAdditionalAttempts = option(argumentsList, "--additional-attempts");
+  if (!runId || rawAdditionalAttempts === null || !argumentsList.includes("--confirm-retry")) {
+    usage();
+    return;
+  }
+  const additionalAttempts = Number(rawAdditionalAttempts);
+  if (!Number.isInteger(additionalAttempts) || additionalAttempts < 1) {
+    throw new Error("--additional-attempts must be a positive integer");
+  }
+  const statePath = statePathFrom(argumentsList);
+  await mkdir(dirname(statePath), { recursive: true });
+  const { RunStore } = await import("./core/store.js");
+  const runs = new RunStore(statePath);
+  try {
+    const run = runs.authorizeFailedRetry(runId, additionalAttempts, Date.now());
+    print({
+      authorized: true,
+      runId: run.id,
+      project: run.projectId,
+      taskId: run.taskId,
+      attempt: run.attempt,
+      maxAttempts: run.maxAttempts,
+      failureReason: run.failureReason,
+    });
+  } finally {
+    runs.close();
+  }
+}
+
 async function autopilotCommand(argumentsList: string[]): Promise<void> {
   const statePath = statePathFrom(argumentsList);
   const profilesPath = workerConfigPathFrom(argumentsList);
@@ -484,6 +518,8 @@ function usage(): void {
   agent-runner run-once <project-id> [--dry-run] [--limit <count>] [--task <task-id>]
     [--state <database>] [--profiles <worker-config>] [--workspace-root <directory>]
     [--controller <id>] [--lease-seconds <seconds>] [--max-ci-wait-minutes <minutes>]
+  agent-runner retry-failed <run-id> --additional-attempts <count> --confirm-retry
+    [--state <database>]
   agent-runner autopilot --enable [--minutes <count>] [--max-new-claims <count>]
     [--concurrency <count>] [--no-progress-passes <count>] [--poll-seconds <seconds>]
     [--max-ci-wait-minutes <minutes>] [--max-task-failures <count>] [--state <database>]

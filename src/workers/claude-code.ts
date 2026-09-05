@@ -5,9 +5,12 @@ import type { WorkerAdapter, WorkerOutcome, WorkerRequest } from "./types.js";
 const MAX_CAPTURE_BYTES = 1_000_000;
 
 interface ClaudeJsonResult {
+  type?: unknown;
+  subtype?: unknown;
   result?: unknown;
   session_id?: unknown;
   is_error?: unknown;
+  num_turns?: unknown;
   total_cost_usd?: unknown;
   duration_ms?: unknown;
 }
@@ -118,7 +121,14 @@ export class ClaudeCodeWorker implements WorkerAdapter {
         }
 
         const parsed = parseClaudeResult(stdout);
-        if (exitCode !== 0 || parsed === null || parsed.is_error === true) {
+        if (
+          exitCode !== 0 ||
+          parsed === null ||
+          parsed.type !== "result" ||
+          parsed.subtype !== "success" ||
+          parsed.is_error !== false ||
+          typeof parsed.result !== "string"
+        ) {
           resolve({
             status: "failed",
             worker: this.name,
@@ -191,6 +201,11 @@ function failureSummary(
   const result = stringOrNull(parsed?.result);
   if (result) {
     return result;
+  }
+  const subtype = stringOrNull(parsed?.subtype);
+  if (subtype) {
+    const turns = numberOrNull(parsed?.num_turns);
+    return `Claude Code stopped with ${subtype}${turns === null ? "" : ` after ${turns} turns`}`;
   }
   const error = stderr.trim();
   if (error) {

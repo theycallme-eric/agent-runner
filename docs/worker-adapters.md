@@ -92,6 +92,12 @@ Valid statuses are `succeeded`, `failed`, and `timed-out`. Invalid JSON, non-zer
 missing status/summary fails closed. The wrapper may call a CLI, SDK, local model, or remote service;
 the controller treats all of them identically after normalization.
 
+Claude's JSON result is accepted as worker success only when its documented `type` is `result`, its
+`subtype` is `success`, `is_error` is false, and a text result is present. A clean process exit with
+`error_max_turns`, another error subtype, or no result is a worker failure—not a completed attempt.
+The task prompt names every controller verification command verbatim and tells the worker to run and
+fix them before reporting success; the controller still reruns them independently.
+
 ## Trust boundary
 
 A worker success report is never sufficient to complete a run. Agent Runner independently checks the

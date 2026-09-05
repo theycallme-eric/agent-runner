@@ -227,6 +227,10 @@ export class TaskExecutor {
             request.claimed,
             evidenceSnapshot?.rootPath ?? null,
             previousFailureEvidence(this.#runs, request.claimed.run.id),
+            workerVerificationCommands(
+              request.claimed.task,
+              request.contract.verification.required,
+            ),
           ),
           timeoutMs,
           additionalDirectories: evidenceSnapshot ? [evidenceSnapshot.rootPath] : [],
@@ -567,6 +571,7 @@ function workerPrompt(
   claimed: ClaimedTask,
   evidenceRootPath: string | null,
   previousFailure: string | null,
+  verificationCommands: readonly string[],
 ): string {
   const lines = [
     "Implement exactly one repository task in this isolated workspace.",
@@ -591,8 +596,23 @@ function workerPrompt(
       ...(previousFailure ? ["Previous verification evidence:", previousFailure] : []),
     );
   }
+  if (verificationCommands.length > 0) {
+    lines.push(
+      "",
+      "Before reporting success, run these exact controller-required commands from the workspace and fix every failure:",
+      ...verificationCommands.map((command) => `- ${command}`),
+      "Do not report success unless every command exits successfully.",
+    );
+  }
   lines.push("", claimed.task.prompt);
   return lines.join("\n");
+}
+
+function workerVerificationCommands(
+  task: ClaimedTask["task"],
+  projectCommands: readonly string[],
+): string[] {
+  return [...new Set([...(task.verificationExpectations ?? []), ...projectCommands])];
 }
 
 function previousFailureEvidence(runs: RunStore, runId: string): string | null {

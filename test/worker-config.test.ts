@@ -184,6 +184,8 @@ const args = process.argv.slice(2);
   && args[args.indexOf("--permission-mode") + 1] === "acceptEdits"
   && args[args.indexOf("--setting-sources") + 1] === "";
 process.stdout.write(JSON.stringify({
+  type: "result",
+  subtype: "success",
   result: isolated ? "isolated" : "unsafe",
   session_id: "session-1",
   is_error: !isolated,

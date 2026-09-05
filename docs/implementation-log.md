@@ -760,3 +760,28 @@ transcripts or secrets here.
   exhaustion, and no premature autopilot quarantine. One JSON fixture exceeded its one-second test
   allowance under full-suite process contention; only that synthetic allowance was raised to five
   seconds, with production timeouts unchanged.
+
+## 2026-09-05 — First real retry stop classification and owner recovery
+
+- PNQ TASK-001 attempt two read the approved V5 evidence snapshot but repeated the same invalid
+  `npm test` directory target. The controller again rejected it before publication; no pull request,
+  merge, or downstream claim occurred.
+- The persisted normalized Claude result had no text after an invocation bounded to 50 turns.
+  Because the adapter did not preserve the result subtype, the historical record cannot prove
+  whether this was `error_max_turns` or another error subtype. Anthropic's structured-output
+  contract shows that such error results can omit text and exit the process cleanly. The adapter had
+  checked only process status and `is_error`, so it labeled that stop as worker success even though
+  independent verification still prevented delivery.
+- Claude results now require the documented result/success subtype and text result. Max-turn and
+  other error subtypes fail explicitly. Worker prompts now list every approved task and project
+  verification command verbatim and require the worker to run and fix them; controller verification
+  remains authoritative. The active Fable profile allows 100 turns but retains its $5 local usage
+  guard and the project wall-clock limit.
+- Added a confirmed `retry-failed` owner action for exhausted retryable pre-publication runs. It
+  extends only the named run's durable attempt budget, refuses delivery/safety/active cases, records
+  the authorization, and relies on the normal claim path to create a clean workspace. Retry claims
+  now clear stale current-attempt workspace and worker display fields while historical events remain
+  immutable.
+- Evidence: the full Agent Runner suite passes 135 tests, including max-turn classification,
+  owner-authorized exhaustion recovery, cleared retry display state, and verbatim verification
+  commands in the worker prompt.

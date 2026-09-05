@@ -77,6 +77,40 @@ test("a retryable task failure reclaims the same run only within its attempt bud
   }
 });
 
+test("an explicit owner retry extends only an exhausted pre-publication implementation run", () => {
+  const store = new RunStore();
+  try {
+    const first = store.claim(request({ maxAttempts: 1 }));
+    store.recordWorkspace(first.run.id, {
+      workspacePath: "/old-attempt",
+      branchName: "old-branch",
+      workerProfile: "fixture-worker",
+    }, 1_005);
+    store.recordWorker(first.run.id, {
+      workerName: "fixture-worker",
+      status: "succeeded",
+      model: "fixture-model",
+      sessionId: "old-session",
+      summary: "old result",
+      costUsd: 1,
+      durationMs: 10,
+    }, 1_006);
+    store.transition(first.run.id, "failed", 1_010, { failureReason: "verification-failed" });
+
+    const authorized = store.authorizeFailedRetry(first.run.id, 1, 1_020);
+    assert.equal(authorized.maxAttempts, 2);
+    const retry = store.claim(request({ workerId: "worker-b", now: 1_030, maxAttempts: 1 }));
+    assert.equal(retry.claimed, true);
+    assert.equal(retry.run.id, first.run.id);
+    assert.equal(retry.run.attempt, 2);
+    assert.equal(store.execution(first.run.id)?.workspacePath, null);
+    assert.equal(store.execution(first.run.id)?.workerStatus, null);
+    assert.ok(store.events(first.run.id).some((event) => event.type === "owner-retry-authorized"));
+  } finally {
+    store.close();
+  }
+});
+
 test("a controller restart reads the existing run and reclaims it only after lease expiry", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-runner-restart-"));
   const databasePath = join(directory, "runs.sqlite");

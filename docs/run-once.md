@@ -53,6 +53,18 @@ verification failure in its prompt; it never edits or salvages the failed worksp
 safety failures are not retried, and any run with a delivery identity remains on reconciliation
 rather than launching another worker. Only the final failed attempt is quarantined.
 
+After that configured budget is exhausted, an owner may deliberately grant a specific failed run
+more attempts without changing its approved task revision or editing SQLite directly:
+
+```text
+agent-runner retry-failed <run-id> --additional-attempts 1 --confirm-retry \
+  --state /path/to/state.sqlite
+```
+
+The command refuses nonretryable failures, published work, active runs, and runs that already retain
+an attempt. It records the authorization durably and leaves execution to a later normal controller
+pass.
+
 When automatic delivery merges one of several independently prepared nodes, reconciliation refreshes
 the base before processing the next one. Sibling work is synchronized and independently reverified
 against that new base before it can merge. A transient merge or issue-completion error is retried from
