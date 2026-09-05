@@ -169,18 +169,26 @@ test("failed workspace recovery requires owner authorization and preserves worke
     store.transition(claim.run.id, "failed", 1_010, { failureReason: "worker-failed" });
 
     assert.throws(
-      () => store.completeFailedWorkspaceRecovery(claim.run.id, "head-a", ["result.txt"], 1_020),
+      () => store.completeFailedWorkspaceRecovery(
+        claim.run.id,
+        "base-a",
+        "head-a",
+        ["result.txt"],
+        1_020,
+      ),
       /no owner-authorized workspace recovery/,
     );
     store.authorizeFailedWorkspaceRecovery(claim.run.id, 1_021);
     const recovered = store.completeFailedWorkspaceRecovery(
       claim.run.id,
+      "base-b",
       "head-a",
       ["result.txt"],
       1_022,
     );
 
     assert.equal(recovered.state, "verified");
+    assert.equal(recovered.baseSha, "base-b");
     assert.equal(recovered.failureReason, null);
     assert.equal(recovered.headSha, "head-a");
     assert.equal(store.execution(claim.run.id)?.workerStatus, "failed");

@@ -79,11 +79,13 @@ agent-runner recover-failed-workspace <run-id> --confirm-recovery \
 ```
 
 This is not an automatic salvage path. The command accepts only the workspace already recorded for
-that failed attempt and only while the same approved task revision remains ready. It refuses base,
-branch, profile, delivery, ancestry, empty-change, and protected-path mismatches. It then reruns the
-exact approved task-specific and project checks. Passing work becomes an ordinary verified run; a
-subsequent `run-once` or `autopilot` pass performs the existing delivery and merge sequence. The
-failed worker result and model cost remain in history. See
+that failed attempt and only while the same approved task revision remains ready. It refuses branch,
+profile, delivery, ancestry, empty-change, protected-path, and synchronization-conflict mismatches.
+If a parallel sibling advanced the base, it commits the local candidate, uses the same safe
+synchronization mechanism as reconciliation, and verifies against the resulting current base. It
+then reruns the exact approved task-specific and project checks. Passing work becomes an ordinary
+verified run; a subsequent `run-once` or `autopilot` pass performs the existing delivery and merge
+sequence. The failed worker result and model cost remain in history. See
 [Failed workspace recovery](failed-workspace-recovery.md).
 
 When automatic delivery merges one of several independently prepared nodes, reconciliation refreshes

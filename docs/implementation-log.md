@@ -832,12 +832,19 @@ transcripts or secrets here.
   in its recorded isolated workspace. It makes no model call and cannot operate on verification,
   integrity, protected-path, or already-published failures.
 - Recovery reloads the approved task graph, requires the exact revision to remain ready, rejects
-  base/branch/profile/ancestry drift, runs every approved task and project verification command, and
-  records both authorization and command evidence before marking a clean committed candidate
-  `verified`.
+  branch/profile/ancestry drift, and safely synchronizes a parallel sibling's advanced base before
+  running every approved task and project verification command. Conflicts remain failed and
+  unpublished. Authorization, synchronization, and command evidence are recorded before a clean
+  candidate becomes `verified`.
 - Push, pull-request creation, CI observation, merge, and issue completion remain exclusively in the
   existing delivery/reconciliation path on the next normal controller pass. Historical failed worker
   evidence and cumulative cost are preserved.
 - Added focused store and end-to-end recovery tests covering successful no-worker recovery,
-  verification failure, and protected-path refusal. See
+  advanced-base synchronization, verification failure, and protected-path refusal. See
   [Failed workspace recovery](failed-workspace-recovery.md).
+- The first live advanced-base recovery occurred when PNQ TASK-005 merged while the failed TASK-004
+  candidate was still isolated. Recovery synchronized the new base and the full browser suite caught
+  TASK-005 tests that still assumed the pre-onboarding route. The run remained failed and unpublished;
+  after those integration tests were corrected, all approved checks passed on the merged base and
+  normal delivery auto-merged TASK-004 as PR #19. No second coding-model invocation was used.
+- Evidence: all 143 Agent Runner tests pass, including the deterministic advanced-base recovery case.

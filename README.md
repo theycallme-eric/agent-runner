@@ -123,9 +123,10 @@ identity, safety/integrity failures, active attempts, or an unused configured at
 `recover-failed-workspace` is a narrower, token-free exception for a worker process that failed or
 timed out after leaving useful code in its recorded isolated workspace. It never invokes an LLM and
 never publishes directly. The command re-reads the approved DAG, requires the exact task revision to
-still be ready, rejects base/branch/profile/delivery drift and protected-path changes, reruns every
-approved task and project check, commits the verified candidate, and moves only that run to the
-ordinary `verified` state. The next normal controller pass owns push, pull request, CI, and merge.
+still be ready, rejects branch/profile/delivery drift and protected-path changes, safely synchronizes
+an advanced base, reruns every approved task and project check on the final base, commits the
+verified candidate, and moves only that run to the ordinary `verified` state. The next normal
+controller pass owns push, pull request, CI, and merge.
 See [Failed workspace recovery](docs/failed-workspace-recovery.md).
 
 The built-in GitHub adapter reads issues and GitHub's native `blocked by` relationships. `ready` is

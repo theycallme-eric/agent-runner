@@ -26,16 +26,20 @@ Before recording a candidate as verified, the command:
 1. reloads the external project registration, contract, approved handoff, and current DAG;
 2. requires the exact task ID and revision from the failed run to still be ready;
 3. requires a recorded failed/timed-out worker workspace with no delivery identity;
-4. verifies the live base has not moved, the current workspace branch matches the recorded branch,
-   and the candidate descends from the recorded base;
+4. verifies the current workspace branch matches the recorded branch and the candidate descends
+   from its recorded base;
 5. refuses any changed path covered by a human-gated protected-path rule;
 6. records the owner's recovery authorization before running checks;
-7. runs every approved task-specific check and every project-level required check independently;
-8. rechecks the live base, creates a clean local commit, validates its changed paths and ancestry,
-   and atomically changes the run from `failed` to `verified`.
+7. creates a clean local candidate commit, refreshes the live base, and safely synchronizes an
+   advanced sibling merge; any merge conflict leaves the failed run unpublished;
+8. runs every approved task-specific check and every project-level required check independently on
+   the final base;
+9. rechecks that the live base stayed fixed during verification, validates the final changed paths
+   and ancestry, and atomically changes the run from `failed` to `verified`.
 
-Any failed check leaves the run failed and records the command evidence. The worker's original
-failure, session, duration, and cost remain intact for auditing.
+Any failed check or synchronization conflict leaves the run failed and records the evidence. The
+committed local candidate remains isolated and can be inspected or retried; nothing is pushed. The
+worker's original failure, session, duration, and cost remain intact for auditing.
 
 ## What it does not do
 

@@ -422,6 +422,8 @@ async function recoverFailedWorkspaceCommand(argumentsList: string[]): Promise<v
       state: result.run.state,
       workspacePath: result.workspacePath,
       branchName: result.branchName,
+      baseSha: result.baseSha,
+      baseSynchronized: result.baseSynchronized,
       headSha: result.headSha,
       changedPaths: result.changedPaths,
       verificationCommands: result.verificationCommands,

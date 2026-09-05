@@ -23,6 +23,7 @@ test("owner recovery independently verifies a failed worker workspace without an
     assert.equal(result.recovered, true);
     assert.equal(result.run.state, "verified");
     assert.equal(result.run.failureReason, null);
+    assert.equal(result.baseSynchronized, false);
     assert.notEqual(result.headSha, context.baseSha);
     assert.deepEqual(result.changedPaths, ["result.txt"]);
     assert.deepEqual(result.verificationCommands, [
@@ -36,6 +37,31 @@ test("owner recovery independently verifies a failed worker workspace without an
       1,
     );
     assert.ok(events.some((event) => event.type === "failed-workspace-recovered"));
+  } finally {
+    context.close();
+  }
+});
+
+test("owner recovery synchronizes an advanced base and then reruns complete verification", async () => {
+  const context = createContext();
+  try {
+    writeFileSync(join(context.workspace, "result.txt"), "done\n");
+    writeFileSync(join(context.repository, "sibling.txt"), "merged sibling\n");
+    git(context.repository, ["add", "sibling.txt"]);
+    git(context.repository, ["commit", "-m", "Advance base with sibling"]);
+    const advancedBaseSha = git(context.repository, ["rev-parse", "main"]);
+
+    const result = await context.recovery.recover(context.request);
+
+    assert.equal(result.baseSynchronized, true);
+    assert.equal(result.baseSha, advancedBaseSha);
+    assert.equal(result.run.baseSha, advancedBaseSha);
+    assert.deepEqual(result.changedPaths, ["result.txt"]);
+    assert.equal(git(context.workspace, ["show", "HEAD:sibling.txt"]), "merged sibling");
+    assert.ok(
+      context.runs.events(context.runId)
+        .some((event) => event.type === "workspace-recovery-synchronized"),
+    );
   } finally {
     context.close();
   }
@@ -84,6 +110,7 @@ test("failed-workspace recovery refuses protected changes before committing", as
 
 interface FixtureContext {
   directory: string;
+  repository: string;
   workspace: string;
   baseSha: string;
   runId: string;
@@ -179,12 +206,16 @@ delivery: { pullRequest: true, merge: never }
   const recovery = new FailedWorkspaceRecovery(
     runs,
     new GitWorkspaceRepository(),
-    { inspect: async () => baseSha, refresh: async () => baseSha },
+    {
+      inspect: async () => git(repository, ["rev-parse", "main"]),
+      refresh: async () => git(repository, ["rev-parse", "main"]),
+    },
     new ShellCommandRunner(),
     { now: () => ++now },
   );
   return {
     directory,
+    repository,
     workspace,
     baseSha,
     runId: claim.run.id,

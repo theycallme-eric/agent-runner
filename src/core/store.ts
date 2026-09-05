@@ -278,12 +278,13 @@ export class RunStore {
 
   completeFailedWorkspaceRecovery(
     runId: string,
+    baseSha: string,
     headSha: string,
     changedPaths: readonly string[],
     now: number,
   ): RunRecord {
-    if (headSha.trim() === "" || changedPaths.length === 0) {
-      throw new Error("Recovered workspace must have a non-empty head and changed paths");
+    if (baseSha.trim() === "" || headSha.trim() === "" || changedPaths.length === 0) {
+      throw new Error("Recovered workspace must have a non-empty base, head, and changed paths");
     }
     this.#database.exec("BEGIN IMMEDIATE;");
     try {
@@ -306,19 +307,22 @@ export class RunStore {
       const updated = this.#database.prepare(`
         UPDATE runs
         SET state = 'verified', lease_owner = NULL, lease_expires_at = NULL,
-            head_sha = ?, requires_reverification = 0, failure_reason = NULL, updated_at = ?
+            base_sha = ?, head_sha = ?, requires_reverification = 0,
+            failure_reason = NULL, updated_at = ?
         WHERE id = ? AND state = 'failed'
-      `).run(headSha, now, runId);
+      `).run(baseSha, headSha, now, runId);
       if (updated.changes !== 1) {
         throw new Error(`Failed to atomically recover run ${runId}`);
       }
       this.#event(runId, now, "transition", {
         from: "failed",
         to: "verified",
+        baseSha,
         headSha,
         recovery: "owner-authorized-failed-workspace",
       });
       this.#event(runId, now, "failed-workspace-recovered", {
+        baseSha,
         headSha,
         changedPaths: [...changedPaths],
       });

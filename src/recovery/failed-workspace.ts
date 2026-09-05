@@ -29,6 +29,8 @@ export interface FailedWorkspaceRecoveryResult {
   taskId: string;
   workspacePath: string;
   branchName: string;
+  baseSha: string;
+  baseSynchronized: boolean;
   headSha: string;
   changedPaths: string[];
   verificationCommands: string[];
@@ -80,15 +82,6 @@ export class FailedWorkspaceRecovery {
       lastTimestamp = Math.max(lastTimestamp + 1, this.#now());
       return lastTimestamp;
     };
-    const currentBaseSha = await this.#baseRevisions.inspect(
-      request.project.rootPath,
-      request.contract.project.baseBranch,
-    );
-    if (currentBaseSha !== initial.baseSha) {
-      throw new Error(
-        `Recovery refused because the base advanced from ${initial.baseSha} to ${currentBaseSha}`,
-      );
-    }
     const branchName = await this.#repository.currentBranch(execution.workspacePath);
     if (branchName !== execution.branchName) {
       throw new Error(
@@ -120,73 +113,102 @@ export class FailedWorkspaceRecovery {
       request.contract.verification.required,
     );
     const timeoutMs = request.contract.execution.timeoutMinutes * 60_000;
-    for (const item of verificationCommands) {
-      const outcome = await this.#commands.run({
-        command: item.command,
-        cwd: execution.workspacePath,
-        timeoutMs,
-      });
-      this.#runs.recordEvidence(
-        initial.id,
-        "command-finished",
-        commandEvidence(item.phase, outcome),
-        at(),
-      );
-      if (!outcome.passed) {
-        this.#runs.recordEvidence(initial.id, "workspace-recovery-verification-failed", {
-          phase: item.phase,
-          command: item.command,
-        }, at());
-        throw new Error(`Recovered workspace failed approved command: ${item.command}`);
-      }
-    }
-
-    const baseAfterVerification = await this.#baseRevisions.inspect(
-      request.project.rootPath,
-      request.contract.project.baseBranch,
-    );
-    if (baseAfterVerification !== initial.baseSha) {
-      this.#runs.recordEvidence(initial.id, "workspace-recovery-base-advanced", {
-        claimedBaseSha: initial.baseSha,
-        currentBaseSha: baseAfterVerification,
-      }, at());
-      throw new Error("Recovery refused because the base advanced during verification");
-    }
-    const verifiedSnapshot = await this.#repository.snapshot(
-      execution.workspacePath,
-      initial.baseSha,
-    );
-    if (verifiedSnapshot.changedPaths.length === 0) {
-      throw new Error("Recovered workspace contains no changes after verification");
-    }
-    refuseProtectedPaths(
-      verifiedSnapshot.changedPaths,
-      request.contract.verification.protectedPaths,
-    );
-    const headSha = await this.#repository.commit(
+    const candidateHeadSha = await this.#repository.commit(
       execution.workspacePath,
       `agent-runner: ${task.title}`,
     );
-    const finalSnapshot = await this.#repository.snapshot(
+    const candidateSnapshot = await this.#repository.snapshot(
       execution.workspacePath,
       initial.baseSha,
     );
     if (
-      headSha === initial.baseSha ||
+      candidateHeadSha === initial.baseSha ||
+      candidateSnapshot.headSha !== candidateHeadSha ||
+      candidateSnapshot.changedPaths.length === 0 ||
+      candidateSnapshot.dirty ||
+      !await this.#repository.isAncestor(execution.workspacePath, initial.baseSha, candidateHeadSha)
+    ) {
+      this.#runs.recordEvidence(initial.id, "workspace-recovery-invalid-commit", {
+        headSha: candidateHeadSha,
+        snapshot: candidateSnapshot,
+      }, at());
+      throw new Error("Recovered workspace did not produce a valid clean commit");
+    }
+    refuseProtectedPaths(candidateSnapshot.changedPaths, request.contract.verification.protectedPaths);
+
+    const currentBaseSha = await this.#baseRevisions.refresh(
+      request.project.rootPath,
+      request.contract.project.baseBranch,
+    );
+    let recoveredBaseSha = initial.baseSha;
+    let headSha = candidateHeadSha;
+    if (currentBaseSha !== initial.baseSha) {
+      this.#runs.recordEvidence(initial.id, "workspace-recovery-synchronization-started", {
+        fromBaseSha: initial.baseSha,
+        toBaseSha: currentBaseSha,
+        candidateHeadSha,
+      }, at());
+      const synchronization = await this.#repository.synchronize(
+        execution.workspacePath,
+        currentBaseSha,
+      );
+      if (synchronization.outcome === "conflict") {
+        this.#runs.recordEvidence(initial.id, "workspace-recovery-synchronization-conflict", {
+          fromBaseSha: initial.baseSha,
+          toBaseSha: currentBaseSha,
+          conflictedPaths: synchronization.conflictedPaths,
+        }, at());
+        throw new Error(
+          `Recovered workspace conflicts with the current base: ${synchronization.conflictedPaths.join(", ")}`,
+        );
+      }
+      recoveredBaseSha = currentBaseSha;
+      headSha = synchronization.headSha;
+      this.#runs.recordEvidence(initial.id, "workspace-recovery-synchronized", {
+        baseSha: recoveredBaseSha,
+        headSha,
+      }, at());
+    }
+
+    await this.#verify(
+      initial.id,
+      verificationCommands,
+      execution.workspacePath,
+      timeoutMs,
+      at,
+    );
+    const baseAfterVerification = await this.#baseRevisions.inspect(
+      request.project.rootPath,
+      request.contract.project.baseBranch,
+    );
+    if (baseAfterVerification !== recoveredBaseSha) {
+      this.#runs.recordEvidence(initial.id, "workspace-recovery-base-advanced", {
+        verifiedBaseSha: recoveredBaseSha,
+        currentBaseSha: baseAfterVerification,
+      }, at());
+      throw new Error("Recovery paused because the base advanced during verification; rerun it");
+    }
+    const finalSnapshot = await this.#repository.snapshot(
+      execution.workspacePath,
+      recoveredBaseSha,
+    );
+    if (
       finalSnapshot.headSha !== headSha ||
       finalSnapshot.changedPaths.length === 0 ||
       finalSnapshot.dirty ||
-      !await this.#repository.isAncestor(execution.workspacePath, initial.baseSha, headSha)
+      !await this.#repository.isAncestor(execution.workspacePath, recoveredBaseSha, headSha)
     ) {
-      this.#runs.recordEvidence(initial.id, "workspace-recovery-invalid-commit", {
+      this.#runs.recordEvidence(initial.id, "workspace-recovery-invalid-final-snapshot", {
+        baseSha: recoveredBaseSha,
         headSha,
         snapshot: finalSnapshot,
       }, at());
-      throw new Error("Recovered workspace did not produce a valid clean commit");
+      throw new Error("Recovered workspace changed or became invalid during verification");
     }
     refuseProtectedPaths(finalSnapshot.changedPaths, request.contract.verification.protectedPaths);
     const run = this.#runs.completeFailedWorkspaceRecovery(
       initial.id,
+      recoveredBaseSha,
       headSha,
       finalSnapshot.changedPaths,
       at(),
@@ -197,11 +219,38 @@ export class FailedWorkspaceRecovery {
       taskId: task.id,
       workspacePath: execution.workspacePath,
       branchName: execution.branchName,
+      baseSha: recoveredBaseSha,
+      baseSynchronized: recoveredBaseSha !== initial.baseSha,
       headSha,
       changedPaths: finalSnapshot.changedPaths,
       verificationCommands: verificationCommands.map((item) => item.command),
       nextAction: "normal-controller-delivery",
     };
+  }
+
+  async #verify(
+    runId: string,
+    verificationCommands: ReturnType<typeof approvedVerificationCommands>,
+    workspacePath: string,
+    timeoutMs: number,
+    at: () => number,
+  ): Promise<void> {
+    for (const item of verificationCommands) {
+      const outcome = await this.#commands.run({ command: item.command, cwd: workspacePath, timeoutMs });
+      this.#runs.recordEvidence(
+        runId,
+        "command-finished",
+        commandEvidence(item.phase, outcome),
+        at(),
+      );
+      if (!outcome.passed) {
+        this.#runs.recordEvidence(runId, "workspace-recovery-verification-failed", {
+          phase: item.phase,
+          command: item.command,
+        }, at());
+        throw new Error(`Recovered workspace failed approved command: ${item.command}`);
+      }
+    }
   }
 }
 
