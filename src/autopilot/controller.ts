@@ -393,7 +393,7 @@ function stopForThrownError(error: unknown): AutopilotStopReason {
 }
 
 function isProviderCapacityFailure(message: string): boolean {
-  return /quota|rate[- ]?limit|usage limit|capacity|out of (?:extra )?usage|usage (?:is )?(?:exhausted|unavailable)|resets? at/i
+  return /quota|rate[- ]?limit|(?:usage|session) limit|capacity|out of (?:extra )?usage|usage (?:is )?(?:exhausted|unavailable)|resets? at/i
     .test(message);
 }
 

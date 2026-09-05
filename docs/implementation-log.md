@@ -848,3 +848,18 @@ transcripts or secrets here.
   after those integration tests were corrected, all approved checks passed on the merged base and
   normal delivery auto-merged TASK-004 as PR #19. No second coding-model invocation was used.
 - Evidence: all 143 Agent Runner tests pass, including the deterministic advanced-base recovery case.
+
+## 2026-09-05 — Provider session-limit wording correction
+
+- During the first real PNQ flow batch, TASK-008 returned Claude's explicit `You've hit your session
+  limit · resets 4pm` message. The task workspace remained unchanged and unpublished, but the
+  controller did not classify that exact wording as provider exhaustion because its detector covered
+  usage-limit and reset-at wording, not session-limit wording.
+- Provider-capacity classification now recognizes `session limit` alongside the existing quota,
+  usage, reset, and rate-limit forms. An unattended run stops globally on this message instead of
+  spending another automatic task attempt or treating the provider outage as a product-code failure.
+- TASK-007 independently reached its configured $5 worker cap after 38 turns without changing a
+  file. It remains failed and unpublished; no identical retry was launched. This is retained as an
+  agent-efficiency finding rather than misclassified as a recoverable candidate.
+- Evidence: the focused provider-exhaustion regression test uses the exact observed session-limit
+  wording, and the full Agent Runner suite passes.

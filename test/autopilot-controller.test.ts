@@ -844,7 +844,7 @@ test("a merge-policy preflight error remains a global stop before any task quara
   }
 });
 
-test("provider extra-usage exhaustion stops globally before quarantine or retry", async () => {
+test("provider session-limit exhaustion stops globally before quarantine or retry", async () => {
   const projects = projectsFixture();
   const runs = new RunStore();
   const runId = seedFailedRun(
@@ -859,7 +859,7 @@ test("provider extra-usage exhaustion stops globally before quarantine or retry"
     status: "failed",
     model: "fable",
     sessionId: "quota-session",
-    summary: "You're out of extra usage · resets 5:20am (America/Chicago)",
+    summary: "You've hit your session limit · resets 4pm (America/Chicago)",
     costUsd: 1.5,
     durationMs: 20,
   }, 3);
