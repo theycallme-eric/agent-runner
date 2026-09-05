@@ -77,6 +77,43 @@ test("a retryable task failure reclaims the same run only within its attempt bud
   }
 });
 
+test("worker usage preserves totals across retry display-state replacement", () => {
+  const store = new RunStore();
+  try {
+    const first = store.claim(request());
+    store.recordWorker(first.run.id, {
+      workerName: "fixture-worker",
+      status: "failed",
+      model: "fixture-model",
+      sessionId: "session-one",
+      summary: "first attempt",
+      costUsd: 1.25,
+      durationMs: 10,
+    }, 1_005);
+    store.transition(first.run.id, "failed", 1_010, { failureReason: "worker-failed" });
+
+    const second = store.claim(request({ workerId: "worker-b", now: 1_020 }));
+    store.recordWorker(second.run.id, {
+      workerName: "fixture-worker",
+      status: "succeeded",
+      model: "fixture-model",
+      sessionId: "session-two",
+      summary: "second attempt",
+      costUsd: 2.25,
+      durationMs: 20,
+    }, 1_025);
+
+    assert.deepEqual(store.workerUsage(first.run.id), {
+      attempts: 2,
+      costUsd: 3.5,
+      durationMs: 30,
+    });
+    assert.equal(store.execution(first.run.id)?.workerCostUsd, 2.25);
+  } finally {
+    store.close();
+  }
+});
+
 test("an explicit owner retry extends only an exhausted pre-publication implementation run", () => {
   const store = new RunStore();
   try {

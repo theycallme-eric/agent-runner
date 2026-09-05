@@ -153,6 +153,11 @@ together. Task-local failures and CI timeouts are quarantined so unrelated work 
 distinct quarantined task revisions stop new work by default, and that cumulative count survives a
 controller crash within the same owner-authorized execution. Global approval, repository,
 preflight, worker, or quota failures still stop immediately.
+
+Provider messages that explicitly say usage is exhausted until a reset are treated as global quota
+stops before another automatic retry or task quarantine. Final report duration and cost values are
+cumulative across every recorded worker attempt, including failed retries; the displayed worker,
+model, and session remain the latest attempt for diagnosis.
 See [the autopilot contract](docs/autopilot.md).
 
 ## Coding-agent support

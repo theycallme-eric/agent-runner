@@ -98,6 +98,44 @@ test("requires explicit enablement and bounded positive global concurrency", asy
   }
 });
 
+test("morning report totals include every recorded worker attempt", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  seedMorningReport(runs);
+  const run = runs.listProject("fixture/one")[0];
+  assert.ok(run);
+  runs.recordWorker(run.id, {
+    workerName: "fixture-agent",
+    status: "failed",
+    model: "model-a",
+    sessionId: "session-b",
+    summary: "later attempt",
+    costUsd: 0.5,
+    durationMs: 20,
+  }, 10);
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => resultFixture(request.projectId, "worker-a", false),
+  }, { sleep: async () => undefined });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "usage-report",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 1,
+      maxNoProgressPasses: 1,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+    assert.equal(result.report.totals.estimatedCostUsd, 0.75);
+    assert.equal(result.report.runs.find((entry) => entry.runId === run.id)?.durationMs, 30);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
 test("reports a fully drained DAG as completed", async () => {
   const projects = projectsFixture();
   const runs = new RunStore();
@@ -799,6 +837,83 @@ test("a merge-policy preflight error remains a global stop before any task quara
       globalConcurrency: 1,
     });
     assert.equal(result.stopReason, "run-failure");
+    assert.deepEqual(result.report.quarantined, []);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
+test("provider extra-usage exhaustion stops globally before quarantine or retry", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  const runId = seedFailedRun(
+    runs,
+    "fixture/one",
+    "TASK-QUOTA",
+    "quota-revision",
+    "worker-failed",
+  );
+  runs.recordWorker(runId, {
+    workerName: "claude-code",
+    status: "failed",
+    model: "fable",
+    sessionId: "quota-session",
+    summary: "You're out of extra usage · resets 5:20am (America/Chicago)",
+    costUsd: 1.5,
+    durationMs: 20,
+  }, 3);
+  let calls = 0;
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      calls += 1;
+      const result = resultFixture(request.projectId, "worker-a", false);
+      result.ok = false;
+      result.reconciled.push({
+        taskId: "TASK-OTHER-FAILURE",
+        runId: "unrecorded-terminal-run",
+        state: "failed",
+        execution: "failed",
+        worker: null,
+        workspacePath: "/workspaces/other",
+        delivery: "failed",
+        pullRequestUrl: null,
+        ciStatus: null,
+        ciWaitExpired: false,
+        ciWaitDetail: null,
+        failureReason: "verification-failed",
+      });
+      result.reconciled.push({
+        taskId: "TASK-QUOTA",
+        runId,
+        state: "failed",
+        execution: "failed",
+        worker: { name: "claude-code", model: "fable", status: "failed" },
+        workspacePath: "/workspaces/quota",
+        delivery: "failed",
+        pullRequestUrl: null,
+        ciStatus: null,
+        ciWaitExpired: false,
+        ciWaitDetail: null,
+        failureReason: "worker-failed",
+      });
+      return result;
+    },
+  }, { sleep: async () => undefined });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "quota-stop",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 3,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+    assert.equal(result.stopReason, "quota-unavailable");
+    assert.equal(calls, 1);
     assert.deepEqual(result.report.quarantined, []);
   } finally {
     runs.close();

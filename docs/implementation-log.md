@@ -802,3 +802,25 @@ transcripts or secrets here.
 - Evidence: all 135 Agent Runner tests pass. Focused adapter and executor tests prove the exact
   allowlist reaches Claude and the JSON protocol while the controller-owned verification path remains
   unchanged.
+
+## 2026-09-05 — Real-run provider stop and cumulative usage correction
+
+- PNQ TASK-001 and TASK-002 passed worker and controller verification, passed the protected GitHub
+  check, merged automatically, and closed their source issues. TASK-003 attempt one reached the
+  configured local model budget; its automatic retry then received Claude's explicit account-usage
+  exhaustion message. No TASK-003 pull request was published and all dependent work stayed blocked.
+- The usage message did not match the controller's narrower quota wording, so the execution ended by
+  no-progress after spending the second task attempt instead of stopping globally after the first
+  provider-capacity failure. Quota classification now recognizes explicit out-of-usage/reset wording,
+  checks every failed item in the pass rather than only the first, and runs before task quarantine.
+  A later owner-authorized execution may retry normally after capacity returns, but the stopped
+  execution cannot consume another automatic attempt.
+- The report previously read cost and duration from a replaceable latest-attempt row. That understated
+  the real PNQ run as retries replaced the display row. Reports now total immutable `worker-recorded`
+  events per durable run while leaving worker/model/session as latest-attempt diagnostic fields. The
+  corrected PNQ evidence is $20.4790152 across seven recorded worker attempts, rather than the prior
+  latest-attempt-only total.
+- Evidence: all 138 Agent Runner tests pass. New coverage proves actual provider exhaustion wording
+  stops before quarantine/retry even when another failure appears first, and cumulative usage survives
+  retry display-state replacement. This correction used no coding-model call, GitHub mutation, or
+  product-repository change.

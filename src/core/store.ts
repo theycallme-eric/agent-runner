@@ -119,6 +119,12 @@ export interface WorkerEvidence {
   durationMs: number;
 }
 
+export interface WorkerUsage {
+  attempts: number;
+  costUsd: number | null;
+  durationMs: number;
+}
+
 export interface DeliveryEvidence {
   provider: string;
   externalId: string;
@@ -621,6 +627,32 @@ export class RunStore {
     }));
   }
 
+  workerUsage(runId: string): WorkerUsage {
+    this.#require(runId);
+    let attempts = 0;
+    let durationMs = 0;
+    let costUsd = 0;
+    let hasReportedCost = false;
+    for (const event of this.events(runId)) {
+      if (event.type !== "worker-recorded" || !isObject(event.detail)) continue;
+      attempts += 1;
+      const duration = event.detail.durationMs;
+      if (typeof duration === "number" && Number.isFinite(duration) && duration >= 0) {
+        durationMs += duration;
+      }
+      const cost = event.detail.costUsd;
+      if (typeof cost === "number" && Number.isFinite(cost) && cost >= 0) {
+        costUsd += cost;
+        hasReportedCost = true;
+      }
+    }
+    return {
+      attempts,
+      costUsd: hasReportedCost ? costUsd : null,
+      durationMs,
+    };
+  }
+
   recordWorkspace(runId: string, evidence: WorkspaceEvidence, now: number): void {
     this.#require(runId);
     this.#database
@@ -1056,4 +1088,8 @@ function validateCiStatus(value: string): asserts value is DeliveryCiStatus {
   if (!["none", "pending", "passed", "failed"].includes(value)) {
     throw new Error(`Invalid delivery CI status: ${value}`);
   }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

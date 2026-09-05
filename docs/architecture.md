@@ -139,6 +139,9 @@ multi-project scheduler reuses this joined path with explicit limits, persistent
 identity, cumulative task-revision quarantines, adaptive polling, and a consolidated report.
 Task-local failures and CI timeouts do not prevent unrelated branches from progressing; global
 approval, repository, worker, quota, and safety-preflight failures still stop immediately.
+Explicit provider usage-exhaustion messages are classified as quota failures before task quarantine
+or another retry. The consolidated report derives cumulative worker cost and duration from immutable
+attempt events instead of the replaceable latest-attempt display row.
 
 `run-once` is the first joined public surface. It refreshes `origin/<base>` before claiming and uses
 read-only `ls-remote` checks during execution/delivery, avoiding the stale-local-branch assumption.

@@ -56,7 +56,9 @@ The loop stops on the first applicable global or bounded boundary:
 - configured consecutive passes with no claim or lifecycle/base progress;
 - no remaining branch can progress because it is dependency-blocked, human-gated, waiting, or
   quarantined;
-- missing worker profile or worker/quota unavailability;
+- missing worker profile or worker/quota unavailability (including a provider message that the
+  account is out of usage until a stated reset time); these global stops happen before task
+  quarantine and before another automatic retry;
 - the distinct quarantined-task budget is reached;
 - approval/repository drift or automatic-merge preflight failure; or
 - no enabled registered projects.
@@ -76,7 +78,10 @@ no-progress count. Its report lists every durable run with project/task/run iden
 worker/model/session, duration and cost estimate, pull-request URL, CI, and failure reason. Totals
 summarize completed, human-gated, and failed runs; separate timeout and quarantine lists preserve
 their exact task, pull-request, and reason details. The latest DAG snapshot lists ready, waiting, and
-blocked work per project, while the stop reason identifies a global boundary.
+blocked work per project, while the stop reason identifies a global boundary. Worker identity and
+session describe the latest attempt, while duration and cost are cumulative across every immutable
+worker attempt recorded for that durable run; the total cost therefore does not lose failed or
+replaced attempts.
 
 For a project configured with `merge: after-required-checks`, the same loop merges each safely
 verified node, completes its source issue, refreshes the DAG, and continues with newly unblocked

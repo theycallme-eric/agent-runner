@@ -180,13 +180,12 @@ export class AutopilotController {
         const changed = madeMaterialProgress(result);
         materialProgress ||= changed;
         progress ||= changed || waitingOnRequiredCi(result);
-        recordQuarantines(result, this.#runs, executionId, this.#now());
-
         const stop = globalStopFor(result, this.#runs);
         if (stop) {
           stopReason = stop;
           break;
         }
+        recordQuarantines(result, this.#runs, executionId, this.#now());
         if (this.#runs.autopilotQuarantines(executionId).length >= maxTaskFailures) {
           stopReason = "failure-budget";
           break;
@@ -256,6 +255,7 @@ export class AutopilotController {
       for (const run of this.#runs.listProject(project.id)) {
         const execution = this.#runs.execution(run.id);
         const delivery = this.#runs.delivery(run.id);
+        const usage = this.#runs.workerUsage(run.id);
         rows.push({
           projectId: run.projectId,
           taskId: run.taskId,
@@ -265,8 +265,8 @@ export class AutopilotController {
           worker: execution?.workerName ?? null,
           model: execution?.workerModel ?? null,
           sessionId: execution?.workerSessionId ?? null,
-          costUsd: execution?.workerCostUsd ?? null,
-          durationMs: execution?.workerDurationMs ?? null,
+          costUsd: usage.costUsd,
+          durationMs: usage.attempts > 0 ? usage.durationMs : null,
           pullRequestUrl: delivery?.url ?? null,
           ciStatus: delivery?.ciStatus ?? null,
           failureReason: run.failureReason,
@@ -350,12 +350,13 @@ function waitingOnRequiredCi(result: RunOnceResult): boolean {
 function globalStopFor(result: RunOnceResult, runs: RunStore): AutopilotStopReason | null {
   if (!result.ok) {
     const tasks = [...result.claimed, ...result.reconciled];
-    const failed = tasks.find((item) => item.failureReason);
-    if (failed?.failureReason === "worker-profile-unavailable") return "worker-unavailable";
-    if (failed) {
-      const summary = runs.execution(failed.runId)?.workerSummary ?? "";
-      if (/quota|rate limit|usage limit|capacity/i.test(summary)) return "quota-unavailable";
+    const failed = tasks.filter((item) => item.failureReason);
+    if (failed.some((item) => item.failureReason === "worker-profile-unavailable")) {
+      return "worker-unavailable";
     }
+    if (failed.some((item) =>
+      isProviderCapacityFailure(runs.execution(item.runId)?.workerSummary ?? "")
+    )) return "quota-unavailable";
   }
   return null;
 }
@@ -387,8 +388,13 @@ function recordQuarantines(
 function stopForThrownError(error: unknown): AutopilotStopReason {
   const message = error instanceof Error ? error.message : String(error);
   if (/worker profile|worker-profile-unavailable/i.test(message)) return "worker-unavailable";
-  if (/quota|rate limit|usage limit|capacity/i.test(message)) return "quota-unavailable";
+  if (isProviderCapacityFailure(message)) return "quota-unavailable";
   return "run-failure";
+}
+
+function isProviderCapacityFailure(message: string): boolean {
+  return /quota|rate[- ]?limit|usage limit|capacity|out of (?:extra )?usage|usage (?:is )?(?:exhausted|unavailable)|resets? at/i
+    .test(message);
 }
 
 function validateRequest(request: AutopilotRequest): void {
