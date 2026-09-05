@@ -44,6 +44,9 @@ export class ClaudeCodeWorker implements WorkerAdapter {
     const argumentsList = [
       "--print",
       request.prompt,
+      ...(request.additionalDirectories?.length
+        ? ["--add-dir", ...request.additionalDirectories]
+        : []),
       "--model",
       this.#options.model,
       "--output-format",

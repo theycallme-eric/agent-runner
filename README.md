@@ -39,7 +39,9 @@ Requirements preparation is an upstream responsibility. Agent Runner does not in
 generate requirements, or invoke Requirements Builder. It begins only with an approved task source.
 For Requirements Builder projects, it independently validates the versioned external handoff,
 active owner-approval record, exact GitHub issue contents and labels, and native dependencies before
-reporting or claiming work.
+reporting or claiming work. It validates every approved `sources/...` reference, stages the source
+tree in a controller-owned read-only evidence directory outside the product repository, and gives
+the worker access only for the implementation attempt. The approved originals are never modified.
 
 ## Start here
 
@@ -69,13 +71,15 @@ npm run validate:fixture
 npm run verify
 ```
 
-The suite currently proves that duplicate claims are rejected, expired attempts are bounded, live
+The suite currently proves that duplicate claims are rejected, eligible pre-publication failures
+receive only the configured number of fresh attempts, expired attempts are bounded, live
 leases cannot be stolen, controller restarts preserve state, false worker success is rejected,
 advanced bases are merged and fully reverified, conflicts are restored and reported, protected paths
 wait for a human, review-only changed/closed/merged drafts fail closed, pending CI is polled without
 republishing, automatic merge requires a provable protected CI topology and an exact head, source
 issues close only after a proved merge, crashes resume durable execution/quarantine state, missing
-approved prerequisites block only affected tasks, and workers remain replaceable.
+approved prerequisites block only affected tasks, approved evidence is staged immutably outside the
+product repository, and workers remain replaceable.
 
 ## Current CLI
 

@@ -16,6 +16,7 @@ import {
   type RunRecord,
   type RunState,
 } from "./types.js";
+import { isRetryableTaskFailure } from "./retry-policy.js";
 
 const ALLOWED_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
   discovered: ["claimed"],
@@ -194,6 +195,53 @@ export class RunStore {
     try {
       const existing = this.#findTaskRow(request.projectId, request.taskId, request.revision);
       if (existing) {
+        if (
+          existing.state === "failed" &&
+          existing.attempt < existing.max_attempts &&
+          isRetryableTaskFailure(existing.failure_reason) &&
+          !this.delivery(existing.id)
+        ) {
+          if (maxActive !== null) {
+            const active = this.#database.prepare(`
+              SELECT COUNT(*) AS count
+              FROM runs
+              WHERE project_id = ?
+                AND state IN ('claimed', 'workspace-ready', 'running', 'verifying', 'synchronized')
+            `).get(request.projectId) as { count: number };
+            if (active.count >= maxActive) {
+              this.#database.exec("COMMIT;");
+              return { outcome: "capacity", run: null };
+            }
+          }
+          const nextAttempt = existing.attempt + 1;
+          const retried = this.#database.prepare(`
+            UPDATE runs
+            SET state = 'claimed', lease_owner = ?, lease_expires_at = ?, base_sha = ?,
+                head_sha = NULL, attempt = ?, requires_reverification = 0,
+                failure_reason = NULL, updated_at = ?
+            WHERE id = ? AND state = 'failed' AND attempt = ?
+          `).run(
+            request.workerId,
+            expiresAt,
+            request.baseSha,
+            nextAttempt,
+            request.now,
+            existing.id,
+            existing.attempt,
+          );
+          if (retried.changes !== 1) {
+            throw new Error(`Failed to atomically retry run ${existing.id}`);
+          }
+          this.#event(existing.id, request.now, "task-retried", {
+            previousFailureReason: existing.failure_reason,
+            workerId: request.workerId,
+            leaseExpiresAt: expiresAt,
+            attempt: nextAttempt,
+          });
+          const retriedRow = this.#require(existing.id);
+          this.#database.exec("COMMIT;");
+          return { outcome: "claimed", run: retriedRow };
+        }
         this.#database.exec("COMMIT;");
         return { outcome: "duplicate", run: mapRun(existing) };
       }

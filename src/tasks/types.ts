@@ -13,6 +13,8 @@ export interface TaskNode {
   dependencies: string[];
   requirementIds?: string[];
   sourceRefs?: string[];
+  /** Runtime-only location of the approved external evidence set. Never persisted to GitHub. */
+  evidenceRootPath?: string;
   acceptanceCriteria?: string[];
   verificationExpectations?: string[];
   executionPrerequisites?: Array<{

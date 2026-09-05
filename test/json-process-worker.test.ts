@@ -20,7 +20,7 @@ process.stdin.on("end", () => {
     status: request.protocolVersion === 1 ? "succeeded" : "failed",
     model: "arbitrary-model",
     sessionId: "arbitrary-session",
-    summary: request.prompt,
+    summary: request.prompt + "|" + request.additionalDirectories.join(","),
     durationMs: 5
   }));
 });
@@ -33,13 +33,14 @@ process.stdin.on("end", () => {
     const result = await worker.run({
       workspacePath: directory,
       prompt: "Implement the fixture task",
-      timeoutMs: 1_000,
+      timeoutMs: 5_000,
+      additionalDirectories: [join(directory, "evidence")],
     });
 
     assert.equal(result.status, "succeeded");
     assert.equal(result.worker, "arbitrary-agent");
     assert.equal(result.model, "arbitrary-model");
-    assert.equal(result.summary, "Implement the fixture task");
+    assert.equal(result.summary, `Implement the fixture task|${join(directory, "evidence")}`);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

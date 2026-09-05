@@ -108,6 +108,7 @@ export class JsonProcessWorker implements WorkerAdapter {
           workspacePath: request.workspacePath,
           prompt: request.prompt,
           timeoutMs: request.timeoutMs,
+          additionalDirectories: request.additionalDirectories ?? [],
         }),
       );
     });

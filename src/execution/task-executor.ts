@@ -10,6 +10,11 @@ import type { WorkspaceRepository } from "../workspaces/git-repository.js";
 import type { BaseRevisionProvider } from "../workspaces/base-revision.js";
 import type { WorkspaceManager, WorkspaceRecord } from "../workspaces/types.js";
 import type { CommandOutcome, CommandRunner } from "./command-runner.js";
+import {
+  evidenceSnapshotUnchanged,
+  stageEvidenceSnapshot,
+  type EvidenceSnapshot,
+} from "./evidence-snapshot.js";
 
 const MAX_EVIDENCE_CHARS = 4_000;
 
@@ -72,6 +77,7 @@ export class TaskExecutor {
     };
     let workspace: WorkspaceRecord | null = null;
     let workerOutcome: WorkerOutcome | null = null;
+    let evidenceSnapshot: EvidenceSnapshot | null = null;
 
     const keepLease = (): void => {
       if (
@@ -184,6 +190,30 @@ export class TaskExecutor {
         );
       }
 
+      if (request.claimed.task.evidenceRootPath) {
+        try {
+          evidenceSnapshot = await stageEvidenceSnapshot(
+            request.claimed.task.evidenceRootPath,
+            request.claimed.task.sourceRefs ?? [],
+            workspace.path,
+          );
+          this.#runs.recordEvidence(request.claimed.run.id, "approved-evidence-staged", {
+            snapshotPath: evidenceSnapshot.rootPath,
+            sha256: evidenceSnapshot.sha256,
+            sourceRefs: request.claimed.task.sourceRefs ?? [],
+          }, at());
+        } catch (error) {
+          return this.#failure(
+            request.claimed.run.id,
+            "evidence-preparation-failed",
+            error,
+            at(),
+            workspace,
+            workerOutcome,
+          );
+        }
+      }
+
       this.#runs.transition(request.claimed.run.id, "running", at());
       keepLease();
       workerOutcome = await this.#runWorkerWithHeartbeat(
@@ -193,8 +223,13 @@ export class TaskExecutor {
         worker,
         {
           workspacePath: workspace.path,
-          prompt: workerPrompt(request.claimed),
+          prompt: workerPrompt(
+            request.claimed,
+            evidenceSnapshot?.rootPath ?? null,
+            previousFailureEvidence(this.#runs, request.claimed.run.id),
+          ),
           timeoutMs,
+          additionalDirectories: evidenceSnapshot ? [evidenceSnapshot.rootPath] : [],
         },
         at,
       );
@@ -211,6 +246,24 @@ export class TaskExecutor {
         },
         at(),
       );
+      let evidenceUnchanged = true;
+      if (evidenceSnapshot) {
+        try {
+          evidenceUnchanged = await evidenceSnapshotUnchanged(evidenceSnapshot);
+        } catch {
+          evidenceUnchanged = false;
+        }
+      }
+      if (!evidenceUnchanged) {
+        return this.#failure(
+          request.claimed.run.id,
+          "worker-modified-evidence",
+          "Worker changed its controller-prepared evidence snapshot",
+          at(),
+          workspace,
+          workerOutcome,
+        );
+      }
       if (workerOutcome.status !== "succeeded") {
         return this.#failure(
           request.claimed.run.id,
@@ -510,15 +563,60 @@ function branchFor(claimed: ClaimedTask): string {
   return `agent-runner/${task}-a${claimed.run.attempt}-${claimed.run.id.slice(0, 8)}`;
 }
 
-function workerPrompt(claimed: ClaimedTask): string {
-  return [
+function workerPrompt(
+  claimed: ClaimedTask,
+  evidenceRootPath: string | null,
+  previousFailure: string | null,
+): string {
+  const lines = [
     "Implement exactly one repository task in this isolated workspace.",
     "Follow the repository's checked-in agent instructions.",
     "Do not push, create a pull request, merge, or change unrelated work.",
     "Leave the workspace changes ready for independent controller verification.",
-    "",
-    claimed.task.prompt,
-  ].join("\n");
+  ];
+  if (evidenceRootPath) {
+    lines.push(
+      "",
+      `Approved evidence snapshot (read-only): ${evidenceRootPath}`,
+      "Resolve every approved sources/... reference beneath that directory.",
+      "Only the task's listed source references are authoritative. You may read files they directly import or reference (such as their design-system bundle and assets), but do not use other prototype candidates or unrelated context from the package.",
+      "Never edit, delete, rename, or generate files in the evidence snapshot.",
+    );
+  }
+  if (claimed.run.attempt > 1) {
+    lines.push(
+      "",
+      `This is attempt ${claimed.run.attempt} of ${claimed.run.maxAttempts}.`,
+      "The previous attempt failed independent controller verification. Correct that failure and run every required command before reporting success.",
+      ...(previousFailure ? ["Previous verification evidence:", previousFailure] : []),
+    );
+  }
+  lines.push("", claimed.task.prompt);
+  return lines.join("\n");
+}
+
+function previousFailureEvidence(runs: RunStore, runId: string): string | null {
+  const failed = [...runs.events(runId)].reverse().find((event) => {
+    if (event.type !== "command-finished" || typeof event.detail !== "object" || !event.detail) {
+      return false;
+    }
+    return (event.detail as { passed?: unknown }).passed === false;
+  });
+  if (!failed || typeof failed.detail !== "object" || !failed.detail) return null;
+  const detail = failed.detail as {
+    command?: unknown;
+    stdout?: unknown;
+    stderr?: unknown;
+  };
+  return [
+    typeof detail.command === "string" ? `Command: ${detail.command}` : null,
+    typeof detail.stdout === "string" && detail.stdout.trim()
+      ? `Output: ${detail.stdout.trim().slice(0, 2_000)}`
+      : null,
+    typeof detail.stderr === "string" && detail.stderr.trim()
+      ? `Error: ${detail.stderr.trim().slice(0, 2_000)}`
+      : null,
+  ].filter((entry): entry is string => entry !== null).join("\n") || null;
 }
 
 function taskVerificationCommands(

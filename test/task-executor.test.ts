@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -60,6 +60,58 @@ test("executes a claimed task through an isolated worker and independent verific
       context.runs.events(result.run.id).some((event) => event.type === "verification-passed"),
     );
   } finally {
+    context.close();
+  }
+});
+
+test("stages approved evidence outside the product as an immutable worker reference", async () => {
+  let observedPrompt = "";
+  let observedEvidenceRoot = "";
+  const worker: WorkerAdapter = {
+    name: "fixture-agent",
+    run: async (request) => {
+      observedPrompt = request.prompt;
+      observedEvidenceRoot = request.additionalDirectories?.[0] ?? "";
+      assert.equal(
+        await readFile(join(observedEvidenceRoot, "sources", "design.md"), "utf8"),
+        "approved evidence\n",
+      );
+      await assert.rejects(
+        () => writeFile(join(observedEvidenceRoot, "sources", "design.md"), "changed\n"),
+      );
+      await mkdir(join(request.workspacePath, "src"), { recursive: true });
+      await writeFile(join(request.workspacePath, "src", "result.txt"), "done\n");
+      return {
+        status: "succeeded",
+        worker: "fixture-agent",
+        model: "fixture-model",
+        sessionId: "session-evidence",
+        summary: "used approved evidence",
+        costUsd: 0,
+        durationMs: 1,
+      };
+    },
+  };
+  const context = await createContext(worker);
+  const evidenceRoot = join(context.directory, "requirements-run");
+  mkdirSync(join(evidenceRoot, "sources"), { recursive: true });
+  writeFileSync(join(evidenceRoot, "sources", "design.md"), "approved evidence\n");
+  context.request.claimed.task.evidenceRootPath = evidenceRoot;
+  context.request.claimed.task.sourceRefs = ["sources/design.md"];
+
+  try {
+    const result = await context.executor.execute(context.request);
+    assert.equal(result.outcome, "verified");
+    assert.match(observedPrompt, /Approved evidence snapshot \(read-only\)/);
+    assert.match(observedPrompt, /Only the task's listed source references are authoritative/);
+    assert.notEqual(observedEvidenceRoot, evidenceRoot);
+    assert.equal(readFileSync(join(evidenceRoot, "sources", "design.md"), "utf8"), "approved evidence\n");
+  } finally {
+    if (observedEvidenceRoot) {
+      chmodSync(observedEvidenceRoot, 0o755);
+      chmodSync(join(observedEvidenceRoot, "sources"), 0o755);
+      chmodSync(join(observedEvidenceRoot, "sources", "design.md"), 0o644);
+    }
     context.close();
   }
 });

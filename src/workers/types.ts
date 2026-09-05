@@ -2,6 +2,8 @@ export interface WorkerRequest {
   workspacePath: string;
   prompt: string;
   timeoutMs: number;
+  /** Controller-prepared reference directories. Workers must treat them as read-only. */
+  additionalDirectories?: string[];
 }
 
 export interface WorkerOutcome {

@@ -10,6 +10,7 @@ interface WorkerAdapter {
     workspacePath: string;
     prompt: string;
     timeoutMs: number;
+    additionalDirectories?: string[];
   }): Promise<WorkerOutcome>;
 }
 ```
@@ -52,8 +53,9 @@ valid profile value.
 ## Native adapters
 
 `ClaudeCodeWorker` invokes Claude Code with explicit model, tool, permission, setting-source, MCP,
-session, turn, budget, and timeout choices. The live acceptance proof selected Fable, but changing
-that selection does not change the controller or a product's contract.
+session, turn, budget, timeout, and controller-approved additional-directory choices. The latter is
+used for a read-only evidence snapshot outside the product worktree. The live acceptance proof
+selected Fable, but changing that selection does not change the controller or a product's contract.
 
 Native Codex, OpenHands, or other adapters can implement `WorkerAdapter` when their richer event and
 resume semantics are useful.
@@ -68,7 +70,8 @@ isolated workspace and writes one JSON request to standard input:
   "protocolVersion": 1,
   "workspacePath": "/isolated/worktree",
   "prompt": "Implement task APP-01",
-  "timeoutMs": 120000
+  "timeoutMs": 120000,
+  "additionalDirectories": ["/controller/evidence/run-attempt"]
 }
 ```
 

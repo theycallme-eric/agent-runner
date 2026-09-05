@@ -14,10 +14,12 @@ test("normalizes Claude Code JSON without depending on a live model", async () =
     `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const settingIndex = args.indexOf("--setting-sources");
+const addDirIndex = args.indexOf("--add-dir");
 const isolated = args.includes("--strict-mcp-config")
   && args.includes("--no-chrome")
   && args.includes("--disable-slash-commands")
   && args[settingIndex + 1] === ""
+  && args[addDirIndex + 1] === ${JSON.stringify(join(directory, "evidence"))}
   && process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY === "1";
 process.stdout.write(JSON.stringify({
   result: isolated ? "fixture complete" : "not isolated",
@@ -44,6 +46,7 @@ process.stdout.write(JSON.stringify({
       workspacePath: directory,
       prompt: "Run the fixture",
       timeoutMs: 1_000,
+      additionalDirectories: [join(directory, "evidence")],
     });
 
     assert.deepEqual(result, {

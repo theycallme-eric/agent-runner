@@ -735,3 +735,28 @@ transcripts or secrets here.
   publication, unexpected drafts, cumulative failure budget, crash-persistent execution state,
   global preflight stops, crash-resumed failure budgets, protected CI workflow paths, and task-scoped
   prerequisites. No live GitHub state, product repository, worker model, or user project was touched.
+
+## 2026-09-05 — First real-project evidence and retry correction
+
+- The first authorized PNQ task failed closed before publication: setup, build, and lint passed, but
+  `npm test` targeted a directory rather than its test files. The run remained unmerged and every
+  dependent task stayed blocked.
+- The worker also reported that the approved `sources/...` references were unreachable from its
+  isolated product worktree, so it recreated design-system files from the written requirement. That
+  was rejected as an actual cross-boundary gap; synthetic fixtures had validated handoff metadata
+  but had not exercised a coding worker reading external approved evidence.
+- Approved handoff loading now refuses missing, escaping, or non-file source references before a
+  claim. Execution stages the external source tree into a run-specific controller-owned evidence
+  directory, makes the copy read-only, passes it through the provider-neutral worker request, and
+  verifies its content hash after the worker returns. Claude Code uses its supported `--add-dir`
+  option; the JSON protocol carries the same additional-directory list.
+- The existing `execution.attempts` budget now applies to a narrow allowlist of pre-publication task
+  failures. A retry keeps the same durable run identity, starts a fresh attempt workspace, includes
+  the prior failed verification evidence in the worker prompt, and is not quarantined until the
+  final permitted attempt fails. Runs with delivery identity and safety/integrity failures are not
+  automatically restarted.
+- Evidence: all 133 Agent Runner tests pass. Focused coverage proves missing-source preflight,
+  immutable evidence staging, Claude/JSON adapter propagation, atomic same-run retry, bounded
+  exhaustion, and no premature autopilot quarantine. One JSON fixture exceeded its one-second test
+  allowance under full-suite process contention; only that synthetic allowance was raised to five
+  seconds, with production timeouts unchanged.

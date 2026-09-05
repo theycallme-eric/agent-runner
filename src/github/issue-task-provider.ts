@@ -111,6 +111,7 @@ function approvedTasks(
       dependencies: [],
       requirementIds: [...task.requirementIds],
       sourceRefs: [...task.sourceRefs],
+      evidenceRootPath: handoff.evidenceRootPath,
       acceptanceCriteria: [...task.acceptanceCriteria],
       verificationExpectations: [...task.verificationExpectations],
       executionPrerequisites: task.prerequisiteIds.map((id) => {

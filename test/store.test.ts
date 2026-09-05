@@ -45,6 +45,38 @@ test("a task revision can be claimed only once", () => {
   }
 });
 
+test("a retryable task failure reclaims the same run only within its attempt budget", () => {
+  const store = new RunStore();
+  try {
+    const first = store.claimWithinCapacity(request(), 1);
+    assert.equal(first.outcome, "claimed");
+    store.transition(first.run.id, "failed", 1_010, { failureReason: "verification-failed" });
+
+    const second = store.claimWithinCapacity(request({
+      workerId: "worker-b",
+      now: 1_020,
+      baseSha: "base-b",
+    }), 1);
+    assert.equal(second.outcome, "claimed");
+    assert.equal(second.run.id, first.run.id);
+    assert.equal(second.run.attempt, 2);
+    assert.equal(second.run.baseSha, "base-b");
+    assert.equal(second.run.failureReason, null);
+    assert.equal(
+      store.events(first.run.id).filter((event) => event.type === "task-retried").length,
+      1,
+    );
+
+    store.transition(second.run.id, "failed", 1_030, { failureReason: "verification-failed" });
+    const exhausted = store.claimWithinCapacity(request({ workerId: "worker-c", now: 1_040 }), 1);
+    assert.equal(exhausted.outcome, "duplicate");
+    assert.equal(exhausted.run.attempt, 2);
+    assert.equal(exhausted.run.failureReason, "verification-failed");
+  } finally {
+    store.close();
+  }
+});
+
 test("a controller restart reads the existing run and reclaims it only after lease expiry", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-runner-restart-"));
   const databasePath = join(directory, "runs.sqlite");

@@ -46,6 +46,13 @@ reruns every required verification command, and only then updates the same pull 
 workspaces, changed or closed pull requests, and exhausted attempts fail with durable evidence. See
 [Reconciliation](reconciliation.md).
 
+Before publication, a narrow allowlist of implementation failures—such as worker failure, no
+changes, setup/verification failure, or base advancement—may reclaim the same durable run for a
+fresh attempt while `execution.attempts` remains. The retry gets a new clean worktree and the prior
+verification failure in its prompt; it never edits or salvages the failed workspace. Integrity and
+safety failures are not retried, and any run with a delivery identity remains on reconciliation
+rather than launching another worker. Only the final failed attempt is quarantined.
+
 When automatic delivery merges one of several independently prepared nodes, reconciliation refreshes
 the base before processing the next one. Sibling work is synchronized and independently reverified
 against that new base before it can merge. A transient merge or issue-completion error is retried from

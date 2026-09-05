@@ -526,6 +526,63 @@ test("one terminal task failure is quarantined while unrelated work continues", 
   }
 });
 
+test("a retryable first-attempt failure is not quarantined before its retry", async () => {
+  const projects = projectsFixture();
+  const runs = new RunStore();
+  const claimed = runs.claim({
+    projectId: "fixture/one",
+    taskId: "TASK-RETRYABLE",
+    revision: "retryable-revision",
+    baseSha: "base-a",
+    workerId: "overnight",
+    now: 1,
+    leaseDurationMs: 100,
+    maxAttempts: 2,
+  });
+  runs.transition(claimed.run.id, "failed", 2, { failureReason: "verification-failed" });
+  const controller = new AutopilotController(projects, runs, {
+    run: async (request) => {
+      const result = resultFixture(request.projectId, "worker-a", false);
+      if (request.projectId === "fixture/one") {
+        result.ok = false;
+        result.reconciled.push({
+          taskId: "TASK-RETRYABLE",
+          runId: claimed.run.id,
+          state: "failed",
+          execution: "not-run",
+          worker: null,
+          workspacePath: "/workspaces/retryable",
+          delivery: "failed",
+          pullRequestUrl: null,
+          ciStatus: null,
+          ciWaitExpired: false,
+          ciWaitDetail: null,
+          failureReason: "verification-failed",
+        });
+      }
+      return result;
+    },
+  }, { sleep: async () => undefined });
+
+  try {
+    const result = await controller.run({
+      enabled: true,
+      controllerId: "retryable",
+      leaseDurationMs: 1_000,
+      deadlineAt: Date.now() + 10_000,
+      maxNewClaims: 5,
+      maxNoProgressPasses: 1,
+      pollIntervalMs: 1,
+      globalConcurrency: 1,
+    });
+    assert.equal(result.stopReason, "no-progress");
+    assert.deepEqual(result.report.quarantined, []);
+  } finally {
+    runs.close();
+    projects.close();
+  }
+});
+
 test("pending required CI is progress until its bounded wait expires", async () => {
   const projects = projectsFixture();
   const runs = new RunStore();

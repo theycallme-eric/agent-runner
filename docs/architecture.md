@@ -170,4 +170,10 @@ This preserves upstream task IDs and makes a label alone insufficient authorizat
 repository readiness must exactly match the Runner contract. Named, non-secret execution
 prerequisites remain task-scoped, and their approved verification commands run before claims.
 Approved task-specific verification commands run outside the implementing worker in addition to the
-full project verification suite; both layers rerun after base synchronization.
+full project verification suite; both layers rerun after base synchronization. Every approved
+`sources/...` reference must resolve to a regular file inside the approved run before planning. For
+execution, the controller copies the run's source tree to a run-specific read-only evidence directory
+beside—not inside—the product worktree, grants the worker read access for that attempt, and verifies
+the copy's content hash afterward. Task-listed references are authoritative; adjacent source files
+may be followed only when directly referenced by them, so unselected prototype candidates do not
+become requirements by proximity.

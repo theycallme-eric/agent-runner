@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, realpath } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import type { ProjectContract } from "../project-contract.js";
@@ -49,6 +49,8 @@ export interface ApprovedHandoff {
   }>;
   tasks: ApprovedHandoffTask[];
   handoffSha256: string;
+  /** Runtime-only directory containing the immutable requirements run and its sources. */
+  evidenceRootPath?: string;
 }
 
 interface ApprovalPointer {
@@ -127,7 +129,38 @@ export async function loadApprovedHandoff(
   }
   const record = parseApprovalRecord(await readFile(recordPath, "utf8"));
   validateRecordMatchesHandoff(record, handoff);
-  return handoff;
+  const evidenceRootPath = dirname(path);
+  await validateEvidenceReferences(handoff, evidenceRootPath);
+  return { ...handoff, evidenceRootPath };
+}
+
+async function validateEvidenceReferences(
+  handoff: ApprovedHandoff,
+  evidenceRootPath: string,
+): Promise<void> {
+  const references = new Set(handoff.tasks.flatMap((task) => task.sourceRefs));
+  for (const reference of references) {
+    if (
+      isAbsolute(reference) ||
+      !reference.startsWith("sources/") ||
+      reference.split(/[\\/]/).includes("..")
+    ) {
+      throw new Error(`Approved evidence reference must stay under sources/: ${reference}`);
+    }
+    let path: string;
+    try {
+      path = await realpath(resolve(evidenceRootPath, reference));
+    } catch {
+      throw new Error(`Approved evidence reference is missing: ${reference}`);
+    }
+    const relation = relative(evidenceRootPath, path);
+    if (relation === "" || relation.startsWith("..") || isAbsolute(relation)) {
+      throw new Error(`Approved evidence reference escapes its requirements run: ${reference}`);
+    }
+    if (!(await stat(path)).isFile()) {
+      throw new Error(`Approved evidence reference is not a file: ${reference}`);
+    }
+  }
 }
 
 export function parseApprovedHandoff(source: string): ApprovedHandoff {

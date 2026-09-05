@@ -1,4 +1,5 @@
 import type { RunStore } from "../core/store.js";
+import { isRetryableTaskFailure } from "../core/retry-policy.js";
 import type { ProjectRegistryStore } from "../projects/registry.js";
 import type {
   RunOnceController,
@@ -372,7 +373,12 @@ function recordQuarantines(
       : item.state === "failed" || item.delivery === "failed" || item.execution === "failed"
         ? item.failureReason ?? "task-run-failed"
         : null;
-    if (reason && runs.get(item.runId)) {
+    const run = runs.get(item.runId);
+    if (
+      reason &&
+      run &&
+      !(run.state === "failed" && run.attempt < run.maxAttempts && isRetryableTaskFailure(reason))
+    ) {
       runs.recordAutopilotQuarantine(executionId, item.runId, reason, now);
     }
   }

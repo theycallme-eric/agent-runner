@@ -27,6 +27,10 @@ for one owner-authorized autopilot execution, not per hour: repeated observation
 revision count once, and a process crash resumes the same execution and count. A clean stop ends that
 execution; another explicit launch starts a new bounded execution.
 
+That quarantine budget is separate from per-task attempts. A retryable pre-publication failure does
+not enter quarantine while a configured attempt remains; the next pass reclaims the same durable run
+with a clean attempt workspace. If the final attempt fails, that task revision is quarantined once.
+
 Without `--enable`, the command fails before any project pass. Global concurrency defaults to one
 and can be explicitly raised to at most 16. Projects remain in stable registry order; within a
 project, only dependency-independent ready tasks can be claimed together. The lower of the global

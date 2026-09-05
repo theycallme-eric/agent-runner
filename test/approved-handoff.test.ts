@@ -29,6 +29,7 @@ test("consumes one active exact handoff while preserving requirements task ident
     assert.deepEqual(graph.waiting.map(({ id }) => id), ["TASK-002"]);
     assert.deepEqual(resolved[0]?.requirementIds, ["REQ-001"]);
     assert.deepEqual(resolved[0]?.sourceRefs, ["sources/design.md"]);
+    assert.equal(resolved[0]?.evidenceRootPath, realpathSync(join(fixture.root, "controller")));
     assert.match(resolved[0]?.prompt ?? "", /independently/);
     assert.match(resolved[0]?.revision ?? "", /^([a-f0-9]{64}):TASK-001$/);
   } finally {
@@ -100,12 +101,28 @@ test("rejects modified, unknown-version, and product-injected handoffs", async (
   }
 });
 
+test("fails before planning when approved evidence is missing", async () => {
+  const fixture = approvedFixture();
+  try {
+    rmSync(join(fixture.root, "controller", "sources", "design.md"));
+    await assert.rejects(
+      () => new GitHubIssueTaskProvider(clientFor(fixture.issues, new Map([[2, [1]]])))
+        .listTasks(fixture.project, fixture.contract),
+      /Approved evidence reference is missing: sources\/design.md/,
+    );
+  } finally {
+    fixture.remove();
+  }
+});
+
 function approvedFixture(options: { active?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "approved-handoff-"));
   const productRoot = join(root, "product");
   const controllerRoot = join(root, "controller");
   mkdirSync(productRoot, { recursive: true });
   mkdirSync(controllerRoot, { recursive: true });
+  mkdirSync(join(controllerRoot, "sources"), { recursive: true });
+  writeFileSync(join(controllerRoot, "sources", "design.md"), "approved design evidence\n");
   const setId = "a".repeat(64);
   const labels = ["agent:task", "requirements:approved"];
   const bodies = [1, 2].map((number) => [
