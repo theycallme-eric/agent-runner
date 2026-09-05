@@ -234,6 +234,10 @@ export class TaskExecutor {
           ),
           timeoutMs,
           additionalDirectories: evidenceSnapshot ? [evidenceSnapshot.rootPath] : [],
+          allowedCommands: workerVerificationCommands(
+            request.claimed.task,
+            request.contract.verification.required,
+          ),
         },
         at,
       );

@@ -15,11 +15,13 @@ test("normalizes Claude Code JSON without depending on a live model", async () =
 const args = process.argv.slice(2);
 const settingIndex = args.indexOf("--setting-sources");
 const addDirIndex = args.indexOf("--add-dir");
+const allowedToolsIndex = args.indexOf("--allowedTools");
 const isolated = args.includes("--strict-mcp-config")
   && args.includes("--no-chrome")
   && args.includes("--disable-slash-commands")
   && args[settingIndex + 1] === ""
   && args[addDirIndex + 1] === ${JSON.stringify(join(directory, "evidence"))}
+  && args[allowedToolsIndex + 1] === "Bash(npm test)"
   && process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY === "1";
 process.stdout.write(JSON.stringify({
   type: "result",
@@ -49,6 +51,7 @@ process.stdout.write(JSON.stringify({
       prompt: "Run the fixture",
       timeoutMs: 1_000,
       additionalDirectories: [join(directory, "evidence")],
+      allowedCommands: ["npm test"],
     });
 
     assert.deepEqual(result, {

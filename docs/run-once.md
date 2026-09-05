@@ -53,6 +53,11 @@ verification failure in its prompt; it never edits or salvages the failed worksp
 safety failures are not retried, and any run with a delivery identity remains on reconciliation
 rather than launching another worker. Only the final failed attempt is quarantined.
 
+The worker receives the exact approved task/project verification commands both as prompt text and,
+for adapters that support it, as a scoped execution allowlist. This permits unattended local checks
+without giving the coding agent unrestricted terminal approval. Independent controller execution of
+the same commands remains the acceptance gate.
+
 After that configured budget is exhausted, an owner may deliberately grant a specific failed run
 more attempts without changing its approved task revision or editing SQLite directly:
 

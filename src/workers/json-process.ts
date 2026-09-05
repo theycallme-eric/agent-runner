@@ -109,6 +109,7 @@ export class JsonProcessWorker implements WorkerAdapter {
           prompt: request.prompt,
           timeoutMs: request.timeoutMs,
           additionalDirectories: request.additionalDirectories ?? [],
+          allowedCommands: request.allowedCommands ?? [],
         }),
       );
     });

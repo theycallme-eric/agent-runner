@@ -785,3 +785,20 @@ transcripts or secrets here.
 - Evidence: the full Agent Runner suite passes 135 tests, including max-turn classification,
   owner-authorized exhaustion recovery, cleared retry display state, and verbatim verification
   commands in the worker prompt.
+
+## 2026-09-05 — Scoped worker verification command permission
+
+- PNQ TASK-001 attempt three used the extended turn budget and returned a complete textual report.
+  It also disclosed that Claude Code had denied every `npm`/`node` verification invocation because
+  `permissionMode: acceptEdits` approves file edits but does not approve terminal commands in a
+  headless session. It therefore claimed the original invalid test script was fixed without ever
+  running it. Independent controller verification ran the commands, caught the same `npm test`
+  failure, and again prevented publication.
+- The provider-neutral worker request now carries the exact approved task and project verification
+  commands. Claude maps only those strings to scoped `Bash(<command>)` allowlist entries; it does not
+  receive unrestricted Bash or bypass mode. JSON wrappers receive the same list to enforce using
+  their own native permission system. The commands remain visible in the worker prompt and are still
+  executed independently by the controller after the worker returns.
+- Evidence: all 135 Agent Runner tests pass. Focused adapter and executor tests prove the exact
+  allowlist reaches Claude and the JSON protocol while the controller-owned verification path remains
+  unchanged.

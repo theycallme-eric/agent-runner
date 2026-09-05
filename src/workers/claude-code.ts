@@ -50,6 +50,9 @@ export class ClaudeCodeWorker implements WorkerAdapter {
       ...(request.additionalDirectories?.length
         ? ["--add-dir", ...request.additionalDirectories]
         : []),
+      ...(request.allowedCommands?.length
+        ? ["--allowedTools", ...request.allowedCommands.map((command) => `Bash(${command})`)]
+        : []),
       "--model",
       this.#options.model,
       "--output-format",
@@ -161,6 +164,9 @@ function validateRequest(request: WorkerRequest): void {
   }
   if (request.prompt.trim() === "") {
     throw new Error("prompt must be non-empty");
+  }
+  if (request.allowedCommands?.some((command) => command.trim() === "")) {
+    throw new Error("allowedCommands must contain only non-empty commands");
   }
 }
 

@@ -11,6 +11,7 @@ interface WorkerAdapter {
     prompt: string;
     timeoutMs: number;
     additionalDirectories?: string[];
+    allowedCommands?: string[];
   }): Promise<WorkerOutcome>;
 }
 ```
@@ -71,7 +72,8 @@ isolated workspace and writes one JSON request to standard input:
   "workspacePath": "/isolated/worktree",
   "prompt": "Implement task APP-01",
   "timeoutMs": 120000,
-  "additionalDirectories": ["/controller/evidence/run-attempt"]
+  "additionalDirectories": ["/controller/evidence/run-attempt"],
+  "allowedCommands": ["npm test"]
 }
 ```
 
@@ -97,6 +99,12 @@ Claude's JSON result is accepted as worker success only when its documented `typ
 `error_max_turns`, another error subtype, or no result is a worker failure—not a completed attempt.
 The task prompt names every controller verification command verbatim and tells the worker to run and
 fix them before reporting success; the controller still reruns them independently.
+
+For Claude, those exact commands are also passed as scoped `Bash(<command>)` allowlist entries. This
+lets a headless worker run the checks it has already been instructed to satisfy without granting
+unrestricted shell access. The allowlist comes only from the approved task verification expectations
+and the external project contract; other terminal commands retain Claude's normal permission rules.
+The provider-neutral JSON request carries the same `allowedCommands` list for wrappers to enforce.
 
 ## Trust boundary
 

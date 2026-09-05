@@ -4,6 +4,8 @@ export interface WorkerRequest {
   timeoutMs: number;
   /** Controller-prepared reference directories. Workers must treat them as read-only. */
   additionalDirectories?: string[];
+  /** Exact owner-approved commands a worker may execute for local verification. */
+  allowedCommands?: string[];
 }
 
 export interface WorkerOutcome {

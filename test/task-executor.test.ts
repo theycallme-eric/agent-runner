@@ -23,10 +23,12 @@ import { GitWorktreeManager } from "../src/workspaces/git-worktree.js";
 
 test("executes a claimed task through an isolated worker and independent verification", async () => {
   let observedPrompt = "";
+  let observedAllowedCommands: string[] = [];
   const worker: WorkerAdapter = {
     name: "fixture-agent",
     run: async (request) => {
       observedPrompt = request.prompt;
+      observedAllowedCommands = request.allowedCommands ?? [];
       await mkdir(join(request.workspacePath, "src"), { recursive: true });
       await writeFile(join(request.workspacePath, "src", "result.txt"), "done\n");
       return {
@@ -60,6 +62,10 @@ test("executes a claimed task through an isolated worker and independent verific
     assert.equal(execution?.workerStatus, "succeeded");
     assert.match(observedPrompt, /Before reporting success, run these exact controller-required commands/);
     assert.match(observedPrompt, /- git diff --check/);
+    assert.deepEqual(observedAllowedCommands, [
+      "test \"$(cat src/result.txt)\" = done",
+      "git diff --check",
+    ]);
     assert.ok(
       context.runs.events(result.run.id).some((event) => event.type === "verification-passed"),
     );
