@@ -861,5 +861,9 @@ transcripts or secrets here.
 - TASK-007 independently reached its configured $5 worker cap after 38 turns without changing a
   file. It remains failed and unpublished; no identical retry was launched. This is retained as an
   agent-efficiency finding rather than misclassified as a recoverable candidate.
+- Worker prompts now explicitly begin from the approved task body and direct agents to consult large
+  evidence files surgically through named anchors. The complete approved evidence remains available
+  and authoritative, but an agent is no longer encouraged to consume an entire export before using
+  the already-reviewed requirements.
 - Evidence: the focused provider-exhaustion regression test uses the exact observed session-limit
   wording, and the full Agent Runner suite passes.

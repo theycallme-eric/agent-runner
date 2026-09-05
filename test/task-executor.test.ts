@@ -113,6 +113,7 @@ test("stages approved evidence outside the product as an immutable worker refere
     const result = await context.executor.execute(context.request);
     assert.equal(result.outcome, "verified");
     assert.match(observedPrompt, /Approved evidence snapshot \(read-only\)/);
+    assert.match(observedPrompt, /Start from the approved task body as the implementation contract/);
     assert.match(observedPrompt, /Only the task's listed source references are authoritative/);
     assert.notEqual(observedEvidenceRoot, evidenceRoot);
     assert.equal(readFileSync(join(evidenceRoot, "sources", "design.md"), "utf8"), "approved evidence\n");

@@ -588,6 +588,7 @@ function workerPrompt(
       "",
       `Approved evidence snapshot (read-only): ${evidenceRootPath}`,
       "Resolve every approved sources/... reference beneath that directory.",
+      "Start from the approved task body as the implementation contract. Consult large evidence files surgically for unresolved copy, visual, or interaction details; search named anchors instead of reading an entire export when possible.",
       "Only the task's listed source references are authoritative. You may read files they directly import or reference (such as their design-system bundle and assets), but do not use other prototype candidates or unrelated context from the package.",
       "Never edit, delete, rename, or generate files in the evidence snapshot.",
     );
