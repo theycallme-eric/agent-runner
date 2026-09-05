@@ -813,6 +813,7 @@ transcripts or secrets here.
   no-progress after spending the second task attempt instead of stopping globally after the first
   provider-capacity failure. Quota classification now recognizes explicit out-of-usage/reset wording,
   checks every failed item in the pass rather than only the first, and runs before task quarantine.
+
   A later owner-authorized execution may retry normally after capacity returns, but the stopped
   execution cannot consume another automatic attempt.
 - The report previously read cost and duration from a replaceable latest-attempt row. That understated
@@ -824,3 +825,19 @@ transcripts or secrets here.
   stops before quarantine/retry even when another failure appears first, and cumulative usage survives
   retry display-state replacement. This correction used no coding-model call, GitHub mutation, or
   product-repository change.
+
+## 2026-09-05 — Owner-authorized failed-workspace recovery
+
+- Added a deliberately narrow recovery for a failed or timed-out worker that left a useful candidate
+  in its recorded isolated workspace. It makes no model call and cannot operate on verification,
+  integrity, protected-path, or already-published failures.
+- Recovery reloads the approved task graph, requires the exact revision to remain ready, rejects
+  base/branch/profile/ancestry drift, runs every approved task and project verification command, and
+  records both authorization and command evidence before marking a clean committed candidate
+  `verified`.
+- Push, pull-request creation, CI observation, merge, and issue completion remain exclusively in the
+  existing delivery/reconciliation path on the next normal controller pass. Historical failed worker
+  evidence and cumulative cost are preserved.
+- Added focused store and end-to-end recovery tests covering successful no-worker recovery,
+  verification failure, and protected-path refusal. See
+  [Failed workspace recovery](failed-workspace-recovery.md).

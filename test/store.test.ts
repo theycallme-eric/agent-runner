@@ -148,6 +148,48 @@ test("an explicit owner retry extends only an exhausted pre-publication implemen
   }
 });
 
+test("failed workspace recovery requires owner authorization and preserves worker evidence", () => {
+  const store = new RunStore();
+  try {
+    const claim = store.claim(request({ maxAttempts: 1 }));
+    store.recordWorkspace(claim.run.id, {
+      workspacePath: "/failed-attempt",
+      branchName: "agent-runner/failed-attempt",
+      workerProfile: "fixture-worker",
+    }, 1_005);
+    store.recordWorker(claim.run.id, {
+      workerName: "fixture-worker",
+      status: "failed",
+      model: "fixture-model",
+      sessionId: "failed-session",
+      summary: "budget exhausted",
+      costUsd: 2,
+      durationMs: 20,
+    }, 1_006);
+    store.transition(claim.run.id, "failed", 1_010, { failureReason: "worker-failed" });
+
+    assert.throws(
+      () => store.completeFailedWorkspaceRecovery(claim.run.id, "head-a", ["result.txt"], 1_020),
+      /no owner-authorized workspace recovery/,
+    );
+    store.authorizeFailedWorkspaceRecovery(claim.run.id, 1_021);
+    const recovered = store.completeFailedWorkspaceRecovery(
+      claim.run.id,
+      "head-a",
+      ["result.txt"],
+      1_022,
+    );
+
+    assert.equal(recovered.state, "verified");
+    assert.equal(recovered.failureReason, null);
+    assert.equal(recovered.headSha, "head-a");
+    assert.equal(store.execution(claim.run.id)?.workerStatus, "failed");
+    assert.ok(store.events(claim.run.id).some((event) => event.type === "failed-workspace-recovered"));
+  } finally {
+    store.close();
+  }
+});
+
 test("a controller restart reads the existing run and reclaims it only after lease expiry", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-runner-restart-"));
   const databasePath = join(directory, "runs.sqlite");

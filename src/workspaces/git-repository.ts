@@ -32,6 +32,28 @@ export class GitWorkspaceRepository implements WorkspaceRepository {
     return gitText(this.#gitExecutable, repositoryPath, ["rev-parse", "--verify", ref]);
   }
 
+  currentBranch(workspacePath: string): Promise<string> {
+    return gitText(this.#gitExecutable, workspacePath, ["symbolic-ref", "--short", "HEAD"]);
+  }
+
+  async isAncestor(
+    workspacePath: string,
+    ancestorSha: string,
+    descendantSha: string,
+  ): Promise<boolean> {
+    try {
+      await gitRaw(this.#gitExecutable, workspacePath, [
+        "merge-base",
+        "--is-ancestor",
+        ancestorSha,
+        descendantSha,
+      ]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async snapshot(workspacePath: string, baseSha: string): Promise<WorkspaceSnapshot> {
     const [headSha, committed, modified, untracked, status] = await Promise.all([
       gitText(this.#gitExecutable, workspacePath, ["rev-parse", "HEAD"]),

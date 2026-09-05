@@ -34,6 +34,9 @@ async function main(): Promise<void> {
     case "retry-failed":
       await retryFailedCommand(argumentsList);
       return;
+    case "recover-failed-workspace":
+      await recoverFailedWorkspaceCommand(argumentsList);
+      return;
     case "autopilot":
       await autopilotCommand(argumentsList);
       return;
@@ -359,6 +362,77 @@ async function retryFailedCommand(argumentsList: string[]): Promise<void> {
   }
 }
 
+async function recoverFailedWorkspaceCommand(argumentsList: string[]): Promise<void> {
+  const runId = argumentsList[0];
+  if (!runId || !argumentsList.includes("--confirm-recovery")) {
+    usage();
+    return;
+  }
+  const statePath = statePathFrom(argumentsList);
+  const ghExecutable = process.env.AGENT_RUNNER_GH_BIN ?? "gh";
+  const gitExecutable = process.env.AGENT_RUNNER_GIT_BIN ?? "git";
+  await mkdir(dirname(statePath), { recursive: true });
+  const [
+    { ProjectRegistryStore },
+    { RunStore },
+    { TaskProviderRegistry },
+    { DependencyResolverRegistry },
+    { registerGitHubAdapters },
+    { ProjectPlanner },
+    { GitWorkspaceRepository },
+    { GitRemoteBaseRevisionProvider },
+    { ShellCommandRunner },
+    { FailedWorkspaceRecovery },
+  ] = await Promise.all([
+    import("./projects/registry.js"),
+    import("./core/store.js"),
+    import("./tasks/provider-registry.js"),
+    import("./tasks/dependency-registry.js"),
+    import("./github/register.js"),
+    import("./planning/project-planner.js"),
+    import("./workspaces/git-repository.js"),
+    import("./workspaces/base-revision.js"),
+    import("./execution/command-runner.js"),
+    import("./recovery/failed-workspace.js"),
+  ]);
+  const projects = new ProjectRegistryStore(statePath);
+  const runs = new RunStore(statePath);
+  try {
+    const run = runs.get(runId);
+    if (!run) throw new Error(`Unknown run: ${runId}`);
+    const project = projects.get(run.projectId);
+    if (!project) throw new Error(`Unknown project: ${run.projectId}`);
+    const contract = await loadProjectContract(project.contractPath);
+    const providers = new TaskProviderRegistry();
+    const dependencies = new DependencyResolverRegistry();
+    registerGitHubAdapters(providers, dependencies, ghExecutable);
+    const inspection = await new ProjectPlanner(runs, providers, dependencies)
+      .inspect(project, contract);
+    const result = await new FailedWorkspaceRecovery(
+      runs,
+      new GitWorkspaceRepository(gitExecutable),
+      new GitRemoteBaseRevisionProvider(gitExecutable),
+      new ShellCommandRunner(),
+    ).recover({ runId, project, contract, inspection });
+    print({
+      recovered: result.recovered,
+      runId: result.run.id,
+      project: result.run.projectId,
+      taskId: result.taskId,
+      state: result.run.state,
+      workspacePath: result.workspacePath,
+      branchName: result.branchName,
+      headSha: result.headSha,
+      changedPaths: result.changedPaths,
+      verificationCommands: result.verificationCommands,
+      nextAction: result.nextAction,
+    });
+  } finally {
+    runs.close();
+    projects.close();
+  }
+}
+
 async function autopilotCommand(argumentsList: string[]): Promise<void> {
   const statePath = statePathFrom(argumentsList);
   const profilesPath = workerConfigPathFrom(argumentsList);
@@ -520,6 +594,7 @@ function usage(): void {
     [--controller <id>] [--lease-seconds <seconds>] [--max-ci-wait-minutes <minutes>]
   agent-runner retry-failed <run-id> --additional-attempts <count> --confirm-retry
     [--state <database>]
+  agent-runner recover-failed-workspace <run-id> --confirm-recovery [--state <database>]
   agent-runner autopilot --enable [--minutes <count>] [--max-new-claims <count>]
     [--concurrency <count>] [--no-progress-passes <count>] [--poll-seconds <seconds>]
     [--max-ci-wait-minutes <minutes>] [--max-task-failures <count>] [--state <database>]

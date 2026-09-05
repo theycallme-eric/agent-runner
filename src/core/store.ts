@@ -237,6 +237,100 @@ export class RunStore {
     }
   }
 
+  authorizeFailedWorkspaceRecovery(runId: string, now: number): RunRecord {
+    this.#database.exec("BEGIN IMMEDIATE;");
+    try {
+      const row = this.#database
+        .prepare("SELECT * FROM runs WHERE id = ?")
+        .get(runId) as RunRow | undefined;
+      if (!row) throw new Error(`Unknown run: ${runId}`);
+      assertFailedWorkspaceRecoveryEligible(this.#database, row);
+      const existing = this.#database
+        .prepare(`
+          SELECT 1 AS present
+          FROM run_events
+          WHERE run_id = ? AND event_type = 'owner-workspace-recovery-authorized'
+          LIMIT 1
+        `)
+        .get(runId) as { present: number } | undefined;
+      if (!existing) {
+        const execution = this.#database
+          .prepare("SELECT * FROM run_execution WHERE run_id = ?")
+          .get(runId) as unknown as RunExecutionRow;
+        this.#event(runId, now, "owner-workspace-recovery-authorized", {
+          attempt: row.attempt,
+          failureReason: row.failure_reason,
+          workspacePath: execution.workspace_path,
+          branchName: execution.branch_name,
+        });
+        this.#database
+          .prepare("UPDATE runs SET updated_at = ? WHERE id = ?")
+          .run(now, runId);
+      }
+      const updated = this.#require(runId);
+      this.#database.exec("COMMIT;");
+      return updated;
+    } catch (error) {
+      this.#database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  completeFailedWorkspaceRecovery(
+    runId: string,
+    headSha: string,
+    changedPaths: readonly string[],
+    now: number,
+  ): RunRecord {
+    if (headSha.trim() === "" || changedPaths.length === 0) {
+      throw new Error("Recovered workspace must have a non-empty head and changed paths");
+    }
+    this.#database.exec("BEGIN IMMEDIATE;");
+    try {
+      const row = this.#database
+        .prepare("SELECT * FROM runs WHERE id = ?")
+        .get(runId) as RunRow | undefined;
+      if (!row) throw new Error(`Unknown run: ${runId}`);
+      assertFailedWorkspaceRecoveryEligible(this.#database, row);
+      const authorization = this.#database
+        .prepare(`
+          SELECT 1 AS present
+          FROM run_events
+          WHERE run_id = ? AND event_type = 'owner-workspace-recovery-authorized'
+          LIMIT 1
+        `)
+        .get(runId) as { present: number } | undefined;
+      if (!authorization) {
+        throw new Error(`Run ${runId} has no owner-authorized workspace recovery`);
+      }
+      const updated = this.#database.prepare(`
+        UPDATE runs
+        SET state = 'verified', lease_owner = NULL, lease_expires_at = NULL,
+            head_sha = ?, requires_reverification = 0, failure_reason = NULL, updated_at = ?
+        WHERE id = ? AND state = 'failed'
+      `).run(headSha, now, runId);
+      if (updated.changes !== 1) {
+        throw new Error(`Failed to atomically recover run ${runId}`);
+      }
+      this.#event(runId, now, "transition", {
+        from: "failed",
+        to: "verified",
+        headSha,
+        recovery: "owner-authorized-failed-workspace",
+      });
+      this.#event(runId, now, "failed-workspace-recovered", {
+        headSha,
+        changedPaths: [...changedPaths],
+      });
+      const recovered = this.#require(runId);
+      this.#database.exec("COMMIT;");
+      return recovered;
+    } catch (error) {
+      this.#database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
   #claimTransaction(request: ClaimRequest, maxActive: number | null): CapacityClaimResult {
     const id = randomUUID();
     const expiresAt = request.now + request.leaseDurationMs;
@@ -1087,6 +1181,30 @@ function mapDelivery(row: RunDeliveryRow): RunDeliveryRecord {
 function validateCiStatus(value: string): asserts value is DeliveryCiStatus {
   if (!["none", "pending", "passed", "failed"].includes(value)) {
     throw new Error(`Invalid delivery CI status: ${value}`);
+  }
+}
+
+function assertFailedWorkspaceRecoveryEligible(database: DatabaseSync, row: RunRow): void {
+  if (row.state !== "failed") {
+    throw new Error(`Run ${row.id} is not failed`);
+  }
+  if (!["worker-failed", "worker-timed-out"].includes(row.failure_reason ?? "")) {
+    throw new Error(`Run ${row.id} is not eligible for failed-workspace recovery`);
+  }
+  const delivery = database
+    .prepare("SELECT 1 AS present FROM run_delivery WHERE run_id = ?")
+    .get(row.id) as { present: number } | undefined;
+  if (delivery) {
+    throw new Error(`Run ${row.id} has delivery identity and cannot recover a failed workspace`);
+  }
+  const execution = database
+    .prepare("SELECT * FROM run_execution WHERE run_id = ?")
+    .get(row.id) as RunExecutionRow | undefined;
+  if (!execution?.workspace_path || !execution.branch_name) {
+    throw new Error(`Run ${row.id} has no recorded failed workspace`);
+  }
+  if (!["failed", "timed-out"].includes(execution.worker_status ?? "")) {
+    throw new Error(`Run ${row.id} does not have a failed worker result`);
   }
 }
 

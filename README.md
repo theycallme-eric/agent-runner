@@ -97,6 +97,7 @@ node dist/src/cli.js ready <project-id>
 node dist/src/cli.js profiles --profiles /path/to/workers.yml
 node dist/src/cli.js run-once <project-id> --dry-run --profiles /path/to/workers.yml
 node dist/src/cli.js retry-failed <run-id> --additional-attempts 1 --confirm-retry
+node dist/src/cli.js recover-failed-workspace <run-id> --confirm-recovery
 node dist/src/cli.js autopilot --enable --minutes 480 --max-new-claims 20 --concurrency 2 \
   --max-ci-wait-minutes 60 --max-task-failures 3
 ```
@@ -118,6 +119,14 @@ creation is an owner-authorized operation; deterministic tests use a local fake 
 only extends that run's recorded attempt ceiling; it does not launch a worker. A later `run-once` or
 `autopilot` pass claims the same task revision into a clean workspace. Runs with pull-request
 identity, safety/integrity failures, active attempts, or an unused configured attempt are refused.
+
+`recover-failed-workspace` is a narrower, token-free exception for a worker process that failed or
+timed out after leaving useful code in its recorded isolated workspace. It never invokes an LLM and
+never publishes directly. The command re-reads the approved DAG, requires the exact task revision to
+still be ready, rejects base/branch/profile/delivery drift and protected-path changes, reruns every
+approved task and project check, commits the verified candidate, and moves only that run to the
+ordinary `verified` state. The next normal controller pass owns push, pull request, CI, and merge.
+See [Failed workspace recovery](docs/failed-workspace-recovery.md).
 
 The built-in GitHub adapter reads issues and GitHub's native `blocked by` relationships. `ready` is
 read-only: it refreshes and validates the DAG but does not claim work or launch an agent.

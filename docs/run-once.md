@@ -70,6 +70,22 @@ The command refuses nonretryable failures, published work, active runs, and runs
 an attempt. It records the authorization durably and leaves execution to a later normal controller
 pass.
 
+If a worker itself failed or timed out but its final isolated workspace is already substantially
+complete, the owner can choose a different recovery that does not spend another model invocation:
+
+```text
+agent-runner recover-failed-workspace <run-id> --confirm-recovery \
+  --state /path/to/state.sqlite
+```
+
+This is not an automatic salvage path. The command accepts only the workspace already recorded for
+that failed attempt and only while the same approved task revision remains ready. It refuses base,
+branch, profile, delivery, ancestry, empty-change, and protected-path mismatches. It then reruns the
+exact approved task-specific and project checks. Passing work becomes an ordinary verified run; a
+subsequent `run-once` or `autopilot` pass performs the existing delivery and merge sequence. The
+failed worker result and model cost remain in history. See
+[Failed workspace recovery](failed-workspace-recovery.md).
+
 When automatic delivery merges one of several independently prepared nodes, reconciliation refreshes
 the base before processing the next one. Sibling work is synchronized and independently reverified
 against that new base before it can merge. A transient merge or issue-completion error is retried from
